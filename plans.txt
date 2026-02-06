@@ -15,6 +15,8 @@ These will integrate heavily with Libraries somehow, important events getting mo
 
 Oh, and what the Fate Engine plans to happen needs a Worldline too, independent of what has already happened.
 
+Wordlines in their entirety will NOT fit inside context windows, so only recent events + what the Library recall system brings up will be available to the LLM.
+
 
 Phase Three:
 "Personas"
@@ -25,3 +27,11 @@ One Persona in particular (which isn't actually required to be there) is the Pla
 Phase Four:
 "Fate Engines"
 A Fate Engine is effectively a GM or narrator, making plans for everything. It will need to make plans for the story, take actions from the Personas and move them around, record events, describe the world. Not to mention making nice descriptions for a reader to read - although maybe this is an edge case of making descriptions for the Personas.
+
+In cases where many Personas are active, the Fate Engine will first query each Persona for how soon it wants to do something on a scale from 1 to 10, then randomly select a Persona out of those that returned the highest value to act.
+
+Data passed around will near entirely be plain text for human readdability. Plus plain text is really what LLMs work with. 
+
+The Fate Engine by default will not enforce many rules on what can and can't happen, users can provide in configuration files if they want specific rules as they are configuring the rest of the setting.
+
+On the not of configuration, it'll be manually specified at first, but perhaps later the LLM will be able to assist with initialization and coming up with Persona background lore and stuff.
