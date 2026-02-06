@@ -1,0 +1,27 @@
+"Worldline"
+an AI storytelling experiment
+
+Phase One:
+"Libraries"
+Library objects represent banks of knowledge. One central Library is created for each story reprsenting the absolute truth, and there are additional Libraries for each Persona or perhaps societal perspective. Theoretically, these rules could be broken but those are going to be very complex edge cases and I don't want to deal with them for now.
+
+Under the hood, Libraries are going to use some sort of vector embedding recall system like I used in a past project. Not sure exactly how it'll work and it will probably need some tuning.
+
+Phase Two:
+"Worldlines"
+These objects represent histories - sequences of recent events. One for objective events for the entire world, smaller ones for individual POVs that will include thoughts and stuff. 
+
+These will integrate heavily with Libraries somehow, important events getting moved from Worldline to Library, and maybe Library recall methods might directly return data from Worldlines. 
+
+Oh, and what the Fate Engine plans to happen needs a Worldline too, independent of what has already happened.
+
+
+Phase Three:
+"Personas"
+Persona objects represent characters. I'm going with the odd names for a reason, which is just for fun and given what this project is about I figured it would fit thematically. Each Persona will have a Library object associated with it, representing their personal knowledge and perspective, as well as a Worldline documenting everything that's happened to them. Personas will also have methods that take a description of what is happening around them, and return a description of what they are going to think/do/say.
+
+One Persona in particular (which isn't actually required to be there) is the Player, which will let a human user decide what to do. I wonder, what if an LLM was plugged in directly as the Player? What sort of character would it be?
+
+Phase Four:
+"Fate Engines"
+A Fate Engine is effectively a GM or narrator, making plans for everything. It will need to make plans for the story, take actions from the Personas and move them around, record events, describe the world. Not to mention making nice descriptions for a reader to read - although maybe this is an edge case of making descriptions for the Personas.
