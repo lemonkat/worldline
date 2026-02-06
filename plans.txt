@@ -1,13 +1,20 @@
+NOTE: This is MY planning document, DO NOT TOUCH THIS UNLESS YOU ARE ME
+
 "Worldline"
 an AI storytelling experiment
 
+Phase Zero:
+infrastructure
+we need: 
+- DSPy signatures for everything
+- an API key in .env and code to load it
+- parallelized LLM API calls (might be provided by DSPy)
+- I should actually look at what features DSPy has and see if I can use them
+- basic file I/O functions ("write this to that file", "read this file")
+- page counter
+- embedding + batched embedding functions
+
 Phase One:
-"Libraries"
-Library objects represent banks of knowledge. One central Library is created for each story reprsenting the absolute truth, and there are additional Libraries for each Persona or perhaps societal perspective. Theoretically, these rules could be broken but those are going to be very complex edge cases and I don't want to deal with them for now.
-
-Under the hood, Libraries are going to use some sort of vector embedding recall system like I used in a past project. Not sure exactly how it'll work and it will probably need some tuning.
-
-Phase Two:
 "Worldlines"
 These objects represent histories - sequences of recent events. One for objective events for the entire world, smaller ones for individual POVs that will include thoughts and stuff. 
 
@@ -16,6 +23,17 @@ These will integrate heavily with Libraries somehow, important events getting mo
 Oh, and what the Fate Engine plans to happen needs a Worldline too, independent of what has already happened.
 
 Wordlines in their entirety will NOT fit inside context windows, so only recent events + what the Library recall system brings up will be available to the LLM.
+
+Worldline objects may also be used for system logging purposes, for debugging and such.
+
+Phase Two:
+
+"Libraries"
+Library objects represent banks of knowledge. One central Library is created for each story reprsenting the absolute truth, and there are additional Libraries for each Persona or perhaps societal perspective. Theoretically, these rules could be broken but those are going to be very complex edge cases and I don't want to deal with them for now.
+
+Under the hood, Libraries are going to use some sort of vector embedding recall system like I used in a past project. Not sure exactly how it'll work and it will probably need some tuning.
+
+Libraries will have methods for recalling pertinent info, as well as adding new info. New info may conflict older info and each Library will have some tuning params to determine how this happens - different Personas will do this differently.
 
 
 Phase Three:
@@ -35,3 +53,16 @@ Data passed around will near entirely be plain text for human readdability. Plus
 The Fate Engine by default will not enforce many rules on what can and can't happen, users can provide in configuration files if they want specific rules as they are configuring the rest of the setting.
 
 On the not of configuration, it'll be manually specified at first, but perhaps later the LLM will be able to assist with initialization and coming up with Persona background lore and stuff.
+
+Phase Five:
+other bits and pieces
+things to maybe add: BGM, image generation, a nice UI with saving/loading, AI-assisted background info creation
+
+Other Notes:
+this code is going to be primarily network limited or API rate limited, not computationally expensive. I'll want some parallelization utilities so that I can make concurrent API calls. 
+
+Not to mention I should also make sure on-the-fly model selection can occur so I'm not locked to just one, this should also help me deal with rate limits.
+
+Oh, and the file extension will be ".wdln" for any files storing data. These files will probably contain representations of Worldline and Library objects, as these should be containing nearly the entire state of the story.
+
+Time within a story will be counted in Pages. One page is one step taken by the Fate Engine, and is not necessarily a unit of time.  As such, pages will be comparable but shouldn't be added and subtracted. I'll probably want some sort of page counter object separate of the Fate Engine for testing in early development.
