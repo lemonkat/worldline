@@ -65,4 +65,21 @@ Not to mention I should also make sure on-the-fly model selection can occur so I
 
 Oh, and the file extension will be ".wdln" for any files storing data. These files will probably contain representations of Worldline and Library objects, as these should be containing nearly the entire state of the story.
 
-Time within a story will be counted in Pages. One page is one step taken by the Fate Engine, and is not necessarily a unit of time.  As such, pages will be comparable but shouldn't be added and subtracted. I'll probably want some sort of page counter object separate of the Fate Engine for testing in early development.
+Time within a story will be counted in Pages. One page is one step taken by the Fate Engine, and is not necessarily a unit of time. As such, pages will be comparable but shouldn't be added and subtracted. I'll probably want some sort of page counter object separate of the Fate Engine for testing in early development.
+
+
+Newer other notes:
+
+Notes are small units of info with title, content, embedding, list of relevant page #s. 
+
+worldline objects currently dont have very much functionality - libraries handle searching, they are almost just lists with names. 
+
+the worldline/library split is pretty much only important because libraries are unordered and contain data that is not necessarily associated with a time, while worldlines are ordered. 
+
+So maybe worldline subclasses library, and has the additional functionality that recall of recent events is prioritized?
+
+plus maybe a worldline has a single constantly-updated Note, which is always running at the current time, which collects the last couple Notes into what happened most recently
+
+but then params. libraries have importance weight + similarity weight, worldlines also need recency decay rate and recency weight, as well as how many things to bring up from the recent past
+
+but if more things have happened recently then should more things be brought up? different things might have different recency decay weights. maybe just fixed number of recent events for now?

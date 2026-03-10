@@ -1,5 +1,9 @@
 import os
 import typing
+import dataclasses
+import functools
+
+import numpy as np
 
 import dotenv
 import dspy
@@ -27,7 +31,7 @@ def init() -> None:
     # light and heavy LLMs for different tasks
     LM_LIGHT = dspy.LM("gemini/gemini-3-flash-preview", api_key=GEMINI_API_KEY)
     LM_HEAVY = dspy.LM("gemini/gemini-3-pro-preview", api_key=GEMINI_API_KEY)
-    EMB = dspy.Embedder("models/text-embedding-004", api_key=GEMINI_API_KEY)
+    EMB = dspy.Embedder("gemini/gemini-embedding-001", api_key=GEMINI_API_KEY)
 
     importance = dspy.Predict(
         dspy.Signature(
@@ -38,13 +42,15 @@ def init() -> None:
             Then divide by 100 to get a value between 0 and 1.
             """
         )
-    ).with_config(lm=LM_LIGHT)
+    )
 
+@functools.cache
 def get_importance(text: str) -> float:
     init()
-    return importance(text).value
+    return importance(text=text, lm=LM_LIGHT).importance
 
-def get_emb(text: str | list[str]) -> list[float] | list[list[float]]:
+@functools.cache
+def get_emb(text: str | list[str]) -> np.ndarray[np.float32]:
     init()
     return EMB(text)
 
@@ -65,37 +71,50 @@ class PageCounter:
 
     def __repr__(self) -> str:
         return f"PageCounter({self.page})"
+    
+    def __index__(self) -> int:
+        return self.page
 
+    def __int__(self) -> int:
+        return self.page
+
+@dataclasses.dataclass(frozen=True)
 class Note:
-    def __init__(
-        self, 
-        name: str, 
-        content: str, 
-        page: int | list[int] | PageCounter = 0
-    ) -> None:
-        self.name = name
-        self.content = content
-        if isinstance(page, int):
-            self.pages = [page]
-        elif isinstance(page, list):
-            self.pages = page
-        elif isinstance(page, PageCounter):
-            self.pages = [page.page]
+    """
+    Notes are the fundamental unit of information in Worldline.
 
+    A note is a piece of information, sometimes associated with a specific page.
+    page -1 is for "timeless" information that is not associated with a specific page or point in time.
+    """
+    name: str
+    content: str
+    page: int | PageCounter = -1
+
+    def __post_init__(self):
+        object.__setattr__(self, "page", int(self.page))
+        
     @property
-    def emb(self) -> list[float]:
-        return get_emb(self.content)
+    def emb(self) -> np.ndarray[np.float32]:
+        return get_emb(str(self))
 
     @property
     def importance(self) -> float:
         return get_importance(self.content)
 
     def __str__(self) -> str:
-        return f"{self.name}: {self.content}"
+        return f"{self.name}: {self.content} (page {self.page})" if self.page != -1 else f"{self.name}: {self.content}"
 
-# contain parameters for Worldline/Library recall and other stuff
-class RecallSettings(typing.NamedTuple):
-    weight_sim: float = 0.5
-    weight_recency: float = 0.25
-    weight_importance: float = 0.25
-    page_decay: float = 0.99
+    def copy_with(
+        self, 
+        name: str | None = None, 
+        content: str | None = None, 
+        page: int | PageCounter | None = None
+    ) -> typing.Self:
+        return dataclasses.replace(
+            self, 
+            name=self.name if name is None else name, 
+            content=self.content if content is None else content, 
+            page=self.page if page is None else page
+        )
+
+    
