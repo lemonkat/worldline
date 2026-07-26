@@ -1,0 +1,51 @@
+NOTE: This is MY planning document, DO NOT TOUCH THIS UNLESS YOU ARE ME
+
+so I've been away for a while doing other stuff but Project Worldline has always been in the back of my mind
+and anyways recently i've been learning c++
+and in c++ things are stored in one of two places, the stack and the heap
+the stack is for stuff that is currently being used at this moment, the current task - its contents are forgotten as the current task progresses or things are done and so stuff stops being momentarily useful
+the heap is for everything else, just hanging around, cleared only when explicitly done so or when the whole thing shuts down
+and i was like
+wait this is what Worldline needs
+because effectively i was trying to simplify stuff by combining the stack and the heap
+and they should be seperate
+
+so here's the new idea:
+
+1. Worldline = stack
+
+it contains recent events on a small scale + each larger event that led to them happening
+like frames on the call stack
+so maybe it's like
+
+[level 0]
+jim is currently on a quest to slay the dragon
+[level 1]
+jim has already found the dragon
+jim is currently facing the dragon
+[level 2]
+the dragon is looking at jim
+jim is holding his gun or whatnot
+jim fires
+([level 3] only exists for pedants and is below minimum detail level - Planck Length??? dunno)
+
+and so each stack frame (i'll call them meta-chapters or Arcs or Threads? not sure, but i like Threads) has all relevant high-ish level events pertaining to the last entry of the previous frame
+
+Worldlines have the following operations:
+A: append at current level
+B: enter sublevel
+C: done with sublevel (summarize and return to higher level)
+
+worldline lookup will return the current chain of calls + as many prior events as it can per stack frame
+but the entire content of a frame may be cut off if it's too big
+retroactive summarization might help but might be complicated
+
+2. Library = heap
+acts like a dictionary - lookup, insert, update, delete
+library entries (pages?) have ID, title, content, importance score
+lookup can be by direct ID or embdeding vector
+update is either rewrite or append, depending on necessity, system will reccommend that the AI summarizes content or splits the entry if it hits a certain size threshold
+AI will be told to update with marking saying why non relevant when possible instead of deleting
+"garbage collection" will run if heap gets "full" (not sure if this needs to happen that often) but that will combine like entries, summarize them, delete completely useless ones
+
+persona, fate engine mostly unchanged, still using ReAct system as before
