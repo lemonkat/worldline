@@ -12,6 +12,7 @@ from dataclasses import dataclass, field
 import typing
 
 import numpy as np
+from pydantic import BaseModel, model_validator, PrivateAttr, ConfigDict
 
 from worldline.uid import UID, UIDGenerator
 
@@ -24,18 +25,18 @@ class PageCounter:
 
     Pages are used to measure time or flow within the story. Each event 
     in Worldline is typically associated with a specific page or range of
-    pages. One page is not guaranteed to represent any specific amount
+    pages. Pages are not guaranteed to represent any specific amount
     of time and are meant primarily for comparison use. 
 
     Attributes:
-        page (int): The current page number.
+        page (Page): The current page number.
     """
     def __init__(self, start: Page = 0):
         """
         Initialize the PageCounter.
 
         Args:
-            start (int, optional): The initial page number. Defaults to 0.
+            start (Page, optional): The initial page number. Defaults to 0.
         """
         self.page = start
 
@@ -44,7 +45,7 @@ class PageCounter:
         Advance the page counter by one.
 
         Returns:
-            int: The new current page number.
+            Page: The new current page number.
         """
         self.page += 1
         return self.page
@@ -61,68 +62,198 @@ class PageCounter:
     def __int__(self) -> int:
         return self.page
 
-@dataclass
-class Config:
+class Config(BaseModel):
+    """Bundled configuration settings for Worldline.
+
+    Attributes:
+        worldline_recall_k (int): How many recent beats/sub-arcs per arc to recall for non-root Worldlines.
+        worldline_max_depth (int): Maximum nesting depth for Worldlines.
+        worldline_max_entry_size (int): Maximum text size measured in sentences for Worldline entry contents.
     """
-    Bundled configuration settings for Worldline.
-    """
-    worldline_recall_k: int = 100
+    worldline_recall_k: int = 10
     worldline_max_depth: int = 10
-    # text sizes measured in sentences
     worldline_max_entry_size: int = 10
 
-# note: uid generator and page counter are mutable
-@dataclass(frozen=True)
+class Entity(BaseModel):
+    """Base class for all saveable objects in the Worldline system.
+
+    Provides core infrastructure for generating unique IDs, registering the object 
+    with the global Context, and handling pack/unpack serialization.
+
+    Attributes:
+        ctx (Context): The global engine context.
+        uid (UID | None): The universally unique identifier for this entity.
+        edited (bool): Flag indicating if the entity was mutated this turn.
+    """
+    ctx: "Context"
+    uid: UID | None = None
+    edited: bool = False
+
+    @model_validator(mode="after")
+    def setup(self) -> typing.Self:
+        """Validates the entity post-initialization.
+
+        Assigns a unique ID if one was not provided, and registers the entity 
+        in the global context registry.
+
+        Returns:
+            typing.Self: The validated and registered entity.
+        """
+        if self.uid is None:
+            self.uid = self.ctx.uid_generator.next()
+        self.ctx.registry[self.uid] = self
+        return self
+
+    def unpack(self, state: dict) -> None:
+        """Restores the Entity to a previous state.
+
+        Public API for applying a time-travel or save-file snapshot.
+
+        Args:
+            state (dict): The packed dictionary representation to restore.
+        """
+        if state != self.pack():
+            self._unpack(state)
+
+    def _unpack(self, state: dict) -> None:
+        """Applies a packed state dictionary to internal variables.
+
+        Private implementation. Subclasses MUST override this.
+
+        Args:
+            state (dict): The packed dictionary representation.
+        """
+        return
+
+    def pack(self) -> dict:
+        """Packages the Entity's current narrative state into a snapshot.
+
+        Public API for generating a state dictionary for the Delta Log.
+
+        Returns:
+            dict: The serialized state.
+        """
+        return self._pack()
+
+    def _pack(self) -> dict:
+        """Returns a dictionary representation of current narrative variables.
+
+        Private implementation. Subclasses MUST override this. Context and 
+        embeddings should be ignored.
+
+        Returns:
+            dict: The serialized state.
+        """
+        return {}
+
+    def __eq__(self, other) -> bool:
+        """Checks equality against another object.
+
+        Overrides standard equality to prevent Numpy 'ambiguous truth value' crashes.
+        Two Entities are identical if they share the same Unique ID.
+
+        Args:
+            other (Any): The object to compare against.
+
+        Returns:
+            bool: True if the UIDs match, False otherwise.
+        """
+        if not isinstance(other, Entity):
+            return False
+        return self.uid == other.uid
+
+@dataclass
 class Context:
+    """Bundled state tracking objects for Worldline.
+
+    Maintainins the global entity registry and the delta-log history.
+
+    Attributes:
+        uid_generator (UIDGenerator): The generator for unique IDs.
+        page_counter (PageCounter): The tracker for narrative time.
+        config (Config): The global configuration settings.
+        registry (dict[UID, Entity]): The global dictionary of all instantiated entities.
+        history (list[Update]): The flat-list delta log of all state changes.
     """
-    Bundled state tracking objects for Worldline.
-    """
+    class Update(typing.NamedTuple):
+        """A lightweight, immutable record of an Entity's state at a specific page.
+
+        Attributes:
+            page (Page): The page number when this state was recorded.
+            uid (UID): The unique identifier of the edited entity.
+            state (dict): The packed dictionary snapshot of the entity.
+        """
+        page: Page
+        uid: UID
+        state: dict
+
     uid_generator: UIDGenerator
     page_counter: PageCounter
     config: Config
+    registry: dict[UID, Entity] = field(default_factory=dict)
+    history: list[Update] = field(default_factory=list)
 
+    def record(self) -> None:
+        """Commits all current edits to the history log.
 
-@dataclass(eq=False)
-class Note:
+        Scans the registry for edited entities, packs their state, and appends 
+        them to the history log. If the current page is strictly less than the 
+        latest history entry, the future timeline is erased.
+        """
+        cur_page = self.page_counter.page
+        while self.history and self.history[-1].page > cur_page:
+            self.history.pop()
+
+        for entity in self.registry.values():
+            if entity.edited:
+                entity.edited = False
+                self.history.append(self.Update(cur_page, entity.uid, entity.pack()))
+        
+
+    def rewind(self) -> None:
+        """Reverts the game state to the current page.
+
+        Reverts all entities in the registry to their most recent state prior 
+        to or equal to the current page. Entities created after the current 
+        page are safely ignored.
+        """
+        cur_page = self.page_counter.page
+        updated = set()
+        for page, uid, state in reversed(self.history):
+            if page > cur_page or uid in updated:
+                continue
+            updated.add(uid)
+            self.registry[uid].unpack(state)
+            if len(updated) == len(self.registry):
+                break
+
+class Note(Entity):
+    """Base class for all vector-embeddable knowledge in the Worldline system.
+
+    This class serves as the foundation for both the narrative Stack (Worldlines) 
+    and the narrative Heap (Libraries). It builds upon Entity by adding NLP 
+    capabilities, automatically lazily evaluating and caching LLM vector embeddings 
+    and importance scores based on its narrative content.
+
+    Attributes:
+        importance (float): The evaluated importance score of the Note.
+        emb (np.ndarray): The vector embedding of the Note.
     """
-    Base class for all vector-embeddable knowledge in the Worldline system.
 
-    This class serves as the foundation for both the narrative Stack (WorldlineFrames) 
-    and the narrative Heap (LibraryMemories). It natively implements the Memento pattern 
-    for time-travel via Bi-Temporal history tracking, allowing objects to perfectly 
-    revert to past states without destroying future timelines.
-
-    It also guarantees that every entry has a unique ID, a timestamp, and 
-    automatically synchronizes its LLM embeddings whenever its state changes.
-    """
-
-    class NoteState(typing.NamedTuple):
-        """A snapshot of the Note's state at a specific point in narrative time."""
-        page: Page
-        state: str
-
-    context: Context
-    id: typing.Optional[UID] = None
+    model_config = ConfigDict(arbitrary_types_allowed=True)
     
     # Private cache fields. Use the properties `importance` and `emb` instead.
     # These are only passed in manually when loading from a save file on disk.
-    _importance: typing.Optional[float] = field(default=None)
-    _emb: typing.Optional[np.ndarray] = field(default=None)
-
-    # Time-travel log mapping page numbers to packed string states
-    hist: list[NoteState] = field(default_factory=list)
-    
-    def __post_init__(self) -> None:
-        """
-        Initializes identity for fresh objects.
-        If an object is loaded from disk, the existing ID is safely preserved.
-        """
-        if self.id is None:
-            self.id = self.context.uid_generator.next()
+    _importance: typing.Optional[float] = PrivateAttr(default=None)
+    _emb: typing.Optional[np.ndarray] = PrivateAttr(default=None)
 
     @property
     def importance(self) -> float:
-        """Lazily evaluates the importance score of the Note."""
+        """Lazily evaluates and returns the importance score of the Note.
+
+        Returns:
+            float: The importance score.
+        """
         if self._importance is None:
             from worldline.llm import get_importance
             self._importance = get_importance(self.get_content(False))
@@ -130,94 +261,46 @@ class Note:
 
     @property
     def emb(self) -> np.ndarray:
-        """Lazily evaluates the vector embedding of the Note."""
+        """Lazily evaluates and returns the vector embedding of the Note.
+
+        Returns:
+            np.ndarray: The embedding vector.
+        """
         if self._emb is None:
             from worldline.llm import get_emb
             self._emb = get_emb(self.get_content(False))
         return self._emb
 
-    def get_content(self, include_id: bool = True) -> str:
-        """
-        Public API: Returns the narrative text of this Note for LLM contexts.
+    def get_content(self, include_uid: bool = True) -> str:
+        """Returns the narrative text of this Note for LLM contexts.
         
         Args:
-            include_id (bool): If True, prepends the Note's UID to the string.
+            include_uid (bool, optional): If True, prepends the Note's UID. Defaults to True.
+
+        Returns:
+            str: The formatted narrative string.
         """
-        if include_id:
-            return f"[ID {self.id}] {self._get_content()}"
+        if include_uid:
+            return f"[UID {self.uid}] {self._get_content()}"
         return self._get_content()
 
     def _get_content(self) -> str:
-        """
-        Private Implementation: Subclasses MUST override this to return their narrative text.
+        """Returns the raw narrative text of this Note.
+
+        Private implementation. Subclasses MUST override this.
+
+        Returns:
+            str: The narrative text.
         """
         return ""
 
-    def unpack(self, state: str) -> None:
-        """
-        Public API: Restores the Note to a previous state and synchronizes embeddings.
-        
+    def unpack(self, state: dict) -> None:
+        """Restores the Note to a previous state and clears NLP caches.
+
         Args:
-            state (str): The packed string representation to restore.
+            state (dict): The packed dictionary representation to restore.
         """
-        if state != self.pack():
-            self._unpack(state)
-            
-            # Clear caches so the properties lazily fetch the new state when accessed!
-            self._importance = None
-            self._emb = None
-
-    def _unpack(self, state: str) -> None:
-        """
-        Private Implementation: Subclasses MUST override this to apply a packed state string
-        to their internal variables.
-        """
-        return
-
-    def pack(self) -> str:
-        """
-        Public API: Packages the Note's current narrative state into a string snapshot.
-        """
-        return self._pack()
-
-    def _pack(self) -> str:
-        """
-        Private Implementation: Subclasses MUST override this to return a string representation
-        of their current narrative variables (ignoring context and embeddings).
-        """
-        return ""
-
-    def sync(self) -> None:
-        """
-        Time-Travel: Reverts the Note's internal variables to match the global clock.
-        This does NOT erase future history, allowing for perfect Undo/Redo tracking.
-        """
-        page = self.context.page_counter.page
-        valid_states = [s.state for s in self.hist if s.page <= page]
-        
-        if valid_states:
-            self.unpack(valid_states[-1])
-
-    def save(self) -> None:
-        """
-        Time-Travel: Logs the current state to history. If the Note has diverged from
-        the established timeline, this safely erases the canceled future.
-        """
-        page = self.context.page_counter.page
-        state = self.pack()
-        
-        while self.hist and self.hist[-1].page >= page:
-            self.hist.pop()
-            
-        if not self.hist or self.hist[-1].state != state:
-            self.hist.append(self.NoteState(page, state))
-
-    def __eq__(self, other):
-        """
-        Equality override to prevent Numpy 'ambiguous truth value' crashes.
-        Two notes are identical if they share the same Unique ID.
-        """
-        if not isinstance(other, Note):
-            return False
-        return self.id == other.id
+        super().unpack(state)
+        self._importance = None
+        self._emb = None
             
