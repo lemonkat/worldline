@@ -87,7 +87,7 @@ class Entity(BaseModel):
     """
     ctx: "Context"
     uid: UID | None = None
-    edited: bool = False
+    edited: bool = True
 
     @model_validator(mode="after")
     def setup(self) -> typing.Self:
