@@ -5,14 +5,14 @@ def test_uid_generator_init():
     generator = UIDGenerator()
     assert generator.id_size == 4
     assert generator.prime == 999983
-    assert generator.counter == 0
+    assert generator.state == 0
 
 def test_uid_generator_custom_init():
-    generator = UIDGenerator(start_counter=10, id_size=5, id_chars="01", prime=5)
+    generator = UIDGenerator(state=10, id_size=5, id_chars="01", prime=5)
     assert generator.id_size == 5
     assert generator.id_chars == "01"
     assert generator.prime == 5
-    assert generator.counter == 10
+    assert generator.state == 10
     assert generator.n_ids == 32
 
 def test_uid_generator_coprime_error():
@@ -22,8 +22,8 @@ def test_uid_generator_coprime_error():
 
 def test_next_uid_no_prefix():
     generator = UIDGenerator(id_size=4, id_chars="0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ", prime=999983)
-    uid1 = generator.next_uid()
-    uid2 = generator.next_uid()
+    uid1 = generator.next()
+    uid2 = generator.next()
     
     assert len(uid1) == 4
     assert len(uid2) == 4
@@ -34,7 +34,7 @@ def test_next_uid_no_prefix():
 
 def test_next_uid_with_prefix():
     generator = UIDGenerator()
-    uid = generator.next_uid(prefix="TEST")
+    uid = generator.next(prefix="TEST")
     
     assert uid.startswith("TEST-")
     assert len(uid) == 9 # "TEST-" (5) + 4 random chars
@@ -46,7 +46,7 @@ def test_next_uid_uniqueness_and_determinism():
     
     generated_ids = set()
     for _ in range(9):
-        generated_ids.add(generator.next_uid())
+        generated_ids.add(generator.next())
         
     # All 9 IDs should be unique before it wraps around
     assert len(generated_ids) == 9

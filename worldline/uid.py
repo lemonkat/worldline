@@ -2,6 +2,9 @@ import typing
 import math
 import string
 
+# strings produced by the UID generator
+UID = str
+
 class UIDGenerator:
     def __init__(
         self, 
@@ -28,7 +31,7 @@ class UIDGenerator:
             
         self.state = state
 
-    def next_uid(self, prefix: typing.Optional[str] = None) -> str:
+    def next(self, prefix: typing.Optional[str] = None) -> UID:
         """
         Gets the next available UID and increments the UID generator.
         Number theory go brrr.
