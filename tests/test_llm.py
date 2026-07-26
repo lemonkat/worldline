@@ -67,3 +67,24 @@ def test_get_emb(mock_init):
     assert result == [0.1, 0.2, 0.3]
     mock_init.assert_called_once()
     mock_emb_module.assert_called_once_with("Test text")
+
+@patch("nltk.download")
+def test_count_sentences(mock_download):
+    # Reset the initialization flag and cache for testing
+    llm._NLTK_INITIALIZED = False
+    llm.count_sentences.cache_clear()
+    
+    # Test simple sentences
+    text1 = "This is a sentence. This is another."
+    assert llm.count_sentences(text1) == 2
+    mock_download.assert_called_once_with('punkt', quiet=True)
+    
+    # Test that download is not called again because the flag is set
+    mock_download.reset_mock()
+    text2 = "Just one."
+    assert llm.count_sentences(text2) == 1
+    mock_download.assert_not_called()
+    
+    # Test edge cases (Mr. Smith, ellipses) that would break simple string splits
+    text3 = "Mr. Smith went to the store. He bought apples... lots of them! Was it a good day? Yes."
+    assert llm.count_sentences(text3) == 4

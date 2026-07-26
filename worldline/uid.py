@@ -1,3 +1,13 @@
+"""
+[Phase Zero: supporting infrastructure]
+
+Unique Identifier (UID) generation for the Worldline system.
+
+This module provides deterministic, collision-free, pseudo-random ID generation
+using modular arithmetic with coprimes. This ensures generated IDs do not exhibit
+sequential patterns that might cause LLMs to hallucinate chronological order.
+"""
+
 import typing
 import math
 import string

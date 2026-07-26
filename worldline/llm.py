@@ -1,3 +1,13 @@
+"""
+[Phase Zero: supporting infrastructure]
+
+Large Language Model (LLM) and Embedding integrations.
+
+This module encapsulates all DSPy model configurations and API interactions,
+ensuring that core data structures remain pure and do not have direct 
+dependencies on external network calls or AI models.
+"""
+
 import os
 import functools
 
@@ -5,6 +15,7 @@ import numpy as np
     
 import dotenv
 import dspy
+import nltk
 
 GEMINI_API_KEY: str | None = None
 LM_LIGHT: dspy.LM | None = None
@@ -81,3 +92,19 @@ def get_emb(text: str | list[str]) -> np.ndarray[np.float32]:
     """
     init()
     return EMB(text)
+
+# Global flag so we only run the download once
+_NLTK_INITIALIZED = False
+
+@functools.lru_cache(maxsize=100)
+def count_sentences(text: str) -> int:
+    """
+    Counts how many sentences a text string contains, returning an integer.
+    """
+    global _NLTK_INITIALIZED
+    if not _NLTK_INITIALIZED:
+        # Downloads the grammar rules silently
+        nltk.download("punkt", quiet=True)
+        _NLTK_INITIALIZED = True
+        
+    return len(nltk.tokenize.sent_tokenize(text))
