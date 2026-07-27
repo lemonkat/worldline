@@ -114,11 +114,11 @@ class Worldline(Note):
         return self.open and self.depth < self.ctx.config.worldline_max_depth
 
     @property
-    def latest(self) -> typing.Self:
+    def latest(self) -> "Worldline":
         """Retrieves the deepest open Arc node currently active in the Stack.
 
         Returns:
-            typing.Self: The deepest open Arc.
+            Worldline: The deepest open Arc.
         """
         if self.children and not self.children[-1].content:
             return self.children[-1].latest

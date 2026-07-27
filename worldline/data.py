@@ -94,18 +94,18 @@ class Entity(BaseModel):
         edited (bool): Flag indicating if the entity was mutated this turn.
     """
     ctx: "Context"
-    uid: UID | None = None
+    uid: typing.Optional[UID] = None
     edited: bool = True
 
     @model_validator(mode="after")
-    def setup(self) -> typing.Self:
+    def setup(self) -> "Entity":
         """Validates the entity post-initialization.
 
         Assigns a unique ID if one was not provided, and registers the entity 
         in the global context registry.
 
         Returns:
-            typing.Self: The validated and registered entity.
+            Entity: The validated and registered entity.
         """
         if self.uid is None:
             self.uid = self.ctx.uid_generator.next()
