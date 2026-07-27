@@ -1,7 +1,10 @@
 import pytest
+import numpy as np
+from unittest.mock import patch
+
 from worldline.data import Context, PageCounter, Config
 from worldline.uid import UIDGenerator
-from worldline.library import Record
+from worldline.library import Record, Library, MissingRecordError, UnloadedRecordError
 
 @pytest.fixture
 def mock_ctx():
@@ -11,74 +14,191 @@ def mock_ctx():
         config=Config()
     )
 
-def test_record_initialization(mock_ctx):
-    record = Record(
-        ctx=mock_ctx,
-        title="Safe Code",
-        content="The code is 1234",
-        source="Hunch"
+def test_library_create_update_delete(mock_ctx):
+    library = Library(ctx=mock_ctx, title="Test Lib")
+    
+    # Test Create
+    record = library.create(
+        title="Apples",
+        content="Apples are red.",
+        source="Farmer",
+        related=[]
     )
+    assert record.uid in library.records
+    assert library.records[record.uid].title == "Apples"
+    assert library.edited is True
     
-    assert record.title == "Safe Code"
-    assert record.content == "The code is 1234"
-    assert record.source == "Hunch"
-    assert record.related == []
+    # Test Update (Unloaded should fail)
+    with pytest.raises(UnloadedRecordError):
+        library.update(uid=record.uid, content=" Wait, some are green.")
+        
+    # Test Update (Loaded should succeed)
+    library.recall(record.uid)
+    library.edited = False # Reset for testing
+    record.edited = False
     
-    # Verify inheritance setup (registers automatically with Context)
-    assert record.uid is not None
-    assert mock_ctx.registry[record.uid] is record
+    library.update(uid=record.uid, content=" Wait, some are green.", append=True)
+    assert library.records[record.uid].content == "Apples are red. Wait, some are green."
+    assert library.edited is True
+    assert record.edited is True
+    
+    # Test Overwrite (append=False)
+    library.update(uid=record.uid, content="Only green apples.", append=False)
+    assert library.records[record.uid].content == "Only green apples."
+    
+    # Test Delete (Unloaded should fail)
+    library.refresh() # Clear loaded
+    with pytest.raises(UnloadedRecordError):
+        library.delete(uid=record.uid)
+        
+    # Test Delete (Loaded should succeed)
+    library.recall(record.uid)
+    library.delete(uid=record.uid)
+    assert record.uid not in library.records
 
-def test_record_get_content_formatting(mock_ctx):
-    # Create a related record to test dynamic title resolution
-    related_record = Record(
-        ctx=mock_ctx,
-        title="The Safe",
-        content="It's in the basement."
-    )
+def test_library_refresh_and_recall(mock_ctx):
+    library = Library(ctx=mock_ctx)
+    r1 = library.create(title="R1", content="...")
+    r2 = library.create(title="R2", content="...")
     
-    main_record = Record(
-        ctx=mock_ctx,
-        title="Safe Code",
-        content="The code is 1234",
-        source="Found a note",
-        related=[related_record.uid]
-    )
+    # Recall sets the score to 1e6
+    library.recall(r1.uid)
+    assert r1.uid in library.loaded
+    assert library.loaded[r1.uid] == 1e6
     
-    content_str = main_record.get_content(include_uid=True)
+    # Refresh clears working memory
+    library.refresh()
+    assert len(library.loaded) == 0
+    assert r1.uid not in library.loaded
     
-    # Should include UID prefix natively from Note inheritance
-    assert content_str.startswith(f"[UID {main_record.uid}]")
-    
-    # Should format fields correctly
-    assert "Safe Code:" in content_str
-    assert "The code is 1234" in content_str
-    assert "Source: Found a note" in content_str
-    
-    # Most importantly, it should have dynamically fetched the title of the related record!
-    expected_related_str = f"Related: [UID {related_record.uid}] The Safe"
-    assert expected_related_str in content_str
+    # Recall non-existent raises error
+    with pytest.raises(MissingRecordError):
+        library.recall("FAKE-UID")
 
-def test_record_pack_unpack(mock_ctx):
-    record = Record(
-        ctx=mock_ctx,
-        title="Original Title",
-        content="Original Content",
-        source="Original Source",
-        related=["UID-X", "UID-Y"]
-    )
+def test_library_search(mock_ctx):
+    with patch("worldline.library.get_emb") as mock_emb, patch("worldline.llm.get_importance") as mock_imp:
+        # Mock embeddings to be predictable
+        mock_emb.side_effect = lambda text: np.array([1.0, 0.0]) if "magic" in text else np.array([0.0, 1.0])
+        mock_imp.return_value = 0.5
+        
+        library = Library(ctx=mock_ctx)
+        mock_ctx.config.library_search_k = 1 
+
+        r_magic = library.create(title="Sword", content="magic sword")
+        r_normal = library.create(title="Rock", content="normal rock")
+        
+        # Explicitly set embeddings to avoid Note property lazy-evaluation calling original get_emb
+        r_magic._emb = np.array([1.0, 0.0])
+        r_normal._emb = np.array([0.0, 1.0])
+        r_magic._importance = 0.5
+        r_normal._importance = 0.5
+        
+        # Search for magic (should score high on r_magic)
+        results = library.search("I want magic", mark_loaded=True)
+        assert len(results) > 0
+        assert results[0].uid == r_magic.uid
+        
+        # Verify mark_loaded worked
+        assert r_magic.uid in library.loaded
+        assert r_normal.uid not in library.loaded
+        
+        # Search again for magic (r_magic is already loaded, should return r_normal)
+        results2 = library.search("I want magic", mark_loaded=True)
+        assert len(results2) > 0
+        assert results2[0].uid == r_normal.uid
+
+def test_library_time_travel(mock_ctx):
+    library = Library(ctx=mock_ctx, title="Time Lib")
     
-    state = record.pack()
+    # PAGE 0: Initial State
+    record = library.create(title="Origin", content="Start")
+    library.recall(record.uid)
+    mock_ctx.record()
     
-    assert state["title"] == "Original Title"
-    assert state["content"] == "Original Content"
-    assert state["source"] == "Original Source"
-    assert state["related_UIDs"] == ["UID-X", "UID-Y"]
+    # PAGE 1: First Edit
+    mock_ctx.page_counter.step()
+    library.update(uid=record.uid, title="Future", content=" Next", append=True)
+    mock_ctx.record()
     
-    # Create a blank record and unpack over it
-    blank_record = Record(ctx=mock_ctx)
-    blank_record.unpack(state)
+    assert library.records[record.uid].title == "Future"
+    assert library.records[record.uid].content == "Start Next"
+    # Registry has Library, Record. Page 0 writes both (since edited=True upon creation/recall). Page 1 writes both.
+    assert len(mock_ctx.history) == 4 
     
-    assert blank_record.title == "Original Title"
-    assert blank_record.content == "Original Content"
-    assert blank_record.source == "Original Source"
-    assert blank_record.related == ["UID-X", "UID-Y"]
+    # PAGE 2: Delete
+    mock_ctx.page_counter.step()
+    library.delete(uid=record.uid)
+    mock_ctx.record()
+    
+    assert record.uid not in library.records
+    
+    # TIME TRAVEL: REWIND TO PAGE 1
+    mock_ctx.page_counter.page = 1
+    mock_ctx.rewind()
+    
+    assert record.uid in library.records # Un-deleted!
+    assert library.records[record.uid].title == "Future"
+    assert library.records[record.uid].content == "Start Next"
+    
+    # TIME TRAVEL: REWIND TO PAGE 0
+    mock_ctx.page_counter.page = 0
+    mock_ctx.rewind()
+    
+    assert library.records[record.uid].title == "Origin"
+    assert library.records[record.uid].content == "Start"
+
+def test_record_lazy_evaluation(mock_ctx):
+    with patch("worldline.llm.get_emb") as mock_emb, patch("worldline.llm.get_importance") as mock_imp:
+        mock_emb.return_value = np.array([0.1, 0.2])
+        mock_imp.return_value = 0.95
+        
+        record = Record(ctx=mock_ctx, title="Title", content="Hello world")
+        
+        # API should NOT have been called on init!
+        mock_emb.assert_not_called()
+        mock_imp.assert_not_called()
+        
+        # Accessing properties triggers evaluation
+        assert record.importance == 0.95
+        assert np.array_equal(record.emb, np.array([0.1, 0.2]))
+        
+        mock_emb.assert_called_once()
+        mock_imp.assert_called_once()
+        
+        # Accessing again uses cache (call count remains 1)
+        _ = record.importance
+        _ = record.emb
+        assert mock_imp.call_count == 1
+
+def test_record_unpack_resets_lazy_cache(mock_ctx):
+    with patch("worldline.llm.get_emb") as mock_emb, patch("worldline.llm.get_importance"):
+        record = Record(ctx=mock_ctx, title="State 1", content="")
+        
+        # Trigger cache
+        _ = record.emb
+        assert mock_emb.call_count == 1
+        
+        # Unpack changes state and resets cache
+        record.unpack({"title": "State 2", "content": "", "source": None, "related_UIDs": []})
+        assert record.title == "State 2"
+        
+        # Cache should be cleared, next access triggers API again
+        _ = record.emb
+        assert mock_emb.call_count == 2
+
+def test_record_equality_numpy_fix(mock_ctx):
+    record1 = Record(ctx=mock_ctx, title="A")
+    record1.uid = "ID-1"
+    record1._emb = np.array([1, 2, 3])
+    
+    record2 = Record(ctx=mock_ctx, title="B")
+    record2.uid = "ID-1"
+    record2._emb = np.array([4, 5, 6])
+    
+    record3 = Record(ctx=mock_ctx, title="C")
+    record3.uid = "ID-2"
+    
+    # This would crash with a ValueError without eq=False and the custom __eq__
+    assert record1 == record2
+    assert record1 != record3
+    assert record1 != "not a record"

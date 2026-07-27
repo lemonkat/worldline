@@ -3,7 +3,7 @@ from unittest.mock import patch
 import operator
 import numpy as np
 
-from worldline.data import PageCounter, Note, Context, Config, Entity
+from worldline.data import PageCounter, Note, Context, Config
 from worldline.uid import UIDGenerator
 
 # --- PageCounter Tests ---
@@ -33,7 +33,7 @@ def test_page_counter_int():
     assert operator.index(pc) == 7
 
 
-# --- Context and Entity Tests ---
+# --- Context and Note Tests ---
 
 class MockNote(Note):
     text: str = ""
@@ -54,7 +54,7 @@ def mock_ctx():
     return Context(uid_generator=uid_gen, page_counter=pc, config=Config())
 
 def test_entity_setup_and_registry(mock_ctx):
-    # Entity should automatically get a UID and register itself
+    # Note should automatically get a UID and register itself
     note = MockNote(ctx=mock_ctx, text="Hello")
     assert note.uid is not None
     assert isinstance(note.uid, str)
@@ -115,61 +115,7 @@ def test_context_record_and_rewind(mock_ctx):
     assert mock_ctx.history[-1].state["text"] == "Alternate State 1"
     assert mock_ctx.history[-1].page == 1
 
-def test_note_lazy_evaluation(mock_ctx):
-    with patch("worldline.llm.get_emb") as mock_emb, patch("worldline.llm.get_importance") as mock_imp:
-        mock_emb.return_value = np.array([0.1, 0.2])
-        mock_imp.return_value = 0.95
-        
-        note = MockNote(ctx=mock_ctx, text="Hello world")
-        
-        # API should NOT have been called on init!
-        mock_emb.assert_not_called()
-        mock_imp.assert_not_called()
-        
-        # Accessing properties triggers evaluation
-        assert note.importance == 0.95
-        assert np.array_equal(note.emb, np.array([0.1, 0.2]))
-        
-        mock_emb.assert_called_once()
-        mock_imp.assert_called_once()
-        
-        # Accessing again uses cache (call count remains 1)
-        _ = note.importance
-        _ = note.emb
-        assert mock_imp.call_count == 1
 
-def test_note_unpack_resets_lazy_cache(mock_ctx):
-    with patch("worldline.llm.get_emb") as mock_emb, patch("worldline.llm.get_importance"):
-        note = MockNote(ctx=mock_ctx, text="State 1")
-        
-        # Trigger cache
-        _ = note.emb
-        assert mock_emb.call_count == 1
-        
-        # Unpack changes state and resets cache
-        note.unpack({"text": "State 2"})
-        assert note.text == "State 2"
-        
-        # Cache should be cleared, next access triggers API again
-        _ = note.emb
-        assert mock_emb.call_count == 2
-
-def test_note_equality_numpy_fix(mock_ctx):
-    note1 = MockNote(ctx=mock_ctx, text="A")
-    note1.uid = "ID-1"
-    note1._emb = np.array([1, 2, 3])
-    
-    note2 = MockNote(ctx=mock_ctx, text="B")
-    note2.uid = "ID-1"
-    note2._emb = np.array([4, 5, 6])
-    
-    note3 = MockNote(ctx=mock_ctx, text="C")
-    note3.uid = "ID-2"
-    
-    # This would crash with a ValueError without eq=False and the custom __eq__
-    assert note1 == note2
-    assert note1 != note3
-    assert note1 != "not a note"
 
 def test_note_get_content(mock_ctx):
     note = MockNote(ctx=mock_ctx, text="Test content")

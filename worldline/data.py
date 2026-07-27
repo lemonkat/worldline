@@ -11,8 +11,7 @@ for LLM-derived attributes to avoid circular dependencies.
 from dataclasses import dataclass, field
 import typing
 
-import numpy as np
-from pydantic import BaseModel, model_validator, PrivateAttr, ConfigDict
+from pydantic import BaseModel, model_validator, ConfigDict
 
 from worldline.uid import UID, UIDGenerator
 
@@ -68,7 +67,17 @@ class Config(BaseModel):
     Attributes:
         worldline_recall_k (int): How many recent beats/sub-arcs per arc to recall for non-root Worldlines.
         worldline_max_depth (int): Maximum nesting depth for Worldlines.
+        worldline_avg_entry_size (int): Average text size measured in sentences for Worldline entry contents.
         worldline_max_entry_size (int): Maximum text size measured in sentences for Worldline entry contents.
+
+        library_cache_size (int): Expected maximum number of items in a Library's working memory at once.
+        library_search_k (int): The number of novel records returned by an Auto-RAG search.
+        library_search_weight_sim (float): The multiplier for semantic cosine similarity when searching.
+        library_search_weight_imp (float): The multiplier for intrinsic importance when searching.
+        library_avg_record_size (int): Average text size measured in sentences for a Record.
+        library_max_record_size (int): Maximum text size measured in sentences for a Record.
+        library_avg_n_refs (int): Average number of related pointers a Record should maintain.
+        library_max_n_refs (int): Maximum number of related pointers a Record should maintain.
     """
     worldline_recall_k: int = 10
     worldline_max_depth: int = 10
@@ -77,119 +86,33 @@ class Config(BaseModel):
 
     library_cache_size: int = 30
     library_search_k: int = 10
+    library_search_weight_sim: float = 0.5
+    library_search_weight_imp: float = 0.5
     library_avg_record_size: int = 8
     library_max_record_size: int = 20
     library_avg_n_refs: int = 2
     library_max_n_refs: int = 5
 
-class Entity(BaseModel):
-    """Base class for all saveable objects in the Worldline system.
-
-    Provides core infrastructure for generating unique IDs, registering the object 
-    with the global Context, and handling pack/unpack serialization.
-
-    Attributes:
-        ctx (Context): The global engine context.
-        uid (UID | None): The universally unique identifier for this entity.
-        edited (bool): Flag indicating if the entity was mutated this turn.
-    """
-    ctx: "Context"
-    uid: typing.Optional[UID] = None
-    edited: bool = True
-
-    @model_validator(mode="after")
-    def setup(self) -> "Entity":
-        """Validates the entity post-initialization.
-
-        Assigns a unique ID if one was not provided, and registers the entity 
-        in the global context registry.
-
-        Returns:
-            Entity: The validated and registered entity.
-        """
-        if self.uid is None:
-            self.uid = self.ctx.uid_generator.next()
-        self.ctx.registry[self.uid] = self
-        return self
-
-    def unpack(self, state: dict) -> None:
-        """Restores the Entity to a previous state.
-
-        Public API for applying a time-travel or save-file snapshot.
-
-        Args:
-            state (dict): The packed dictionary representation to restore.
-        """
-        if state != self.pack():
-            self._unpack(state)
-
-    def _unpack(self, state: dict) -> None:
-        """Applies a packed state dictionary to internal variables.
-
-        Private implementation. Subclasses MUST override this.
-
-        Args:
-            state (dict): The packed dictionary representation.
-        """
-        return
-
-    def pack(self) -> dict:
-        """Packages the Entity's current narrative state into a snapshot.
-
-        Public API for generating a state dictionary for the Delta Log.
-
-        Returns:
-            dict: The serialized state.
-        """
-        return self._pack()
-
-    def _pack(self) -> dict:
-        """Returns a dictionary representation of current narrative variables.
-
-        Private implementation. Subclasses MUST override this. Context and 
-        embeddings should be ignored.
-
-        Returns:
-            dict: The serialized state.
-        """
-        return {}
-
-    def __eq__(self, other) -> bool:
-        """Checks equality against another object.
-
-        Overrides standard equality to prevent Numpy 'ambiguous truth value' crashes.
-        Two Entities are identical if they share the same Unique ID.
-
-        Args:
-            other (Any): The object to compare against.
-
-        Returns:
-            bool: True if the UIDs match, False otherwise.
-        """
-        if not isinstance(other, Entity):
-            return False
-        return self.uid == other.uid
-
 @dataclass
 class Context:
     """Bundled state tracking objects for Worldline.
 
-    Maintainins the global entity registry and the delta-log history.
+    Maintainins the global Note registry and the delta-log history.
 
     Attributes:
         uid_generator (UIDGenerator): The generator for unique IDs.
         page_counter (PageCounter): The tracker for narrative time.
         config (Config): The global configuration settings.
-        registry (dict[UID, Entity]): The global dictionary of all instantiated entities.
+        registry (dict[UID, Note]): The global dictionary of all instantiated entities.
         history (list[Update]): The flat-list delta log of all state changes.
     """
     class Update(typing.NamedTuple):
-        """A lightweight, immutable record of an Entity's state at a specific page.
+        """A lightweight, immutable record of a Note's state at a specific page.
 
         Attributes:
             page (Page): The page number when this state was recorded.
-            uid (UID): The unique identifier of the edited entity.
-            state (dict): The packed dictionary snapshot of the entity.
+            uid (UID): The unique identifier of the edited note.
+            state (dict): The packed dictionary snapshot of the note.
         """
         page: Page
         uid: UID
@@ -198,7 +121,7 @@ class Context:
     uid_generator: UIDGenerator
     page_counter: PageCounter
     config: Config
-    registry: dict[UID, Entity] = field(default_factory=dict)
+    registry: dict[UID, "Note"] = field(default_factory=dict)
     history: list[Update] = field(default_factory=list)
 
     def record(self) -> None:
@@ -235,49 +158,94 @@ class Context:
             if len(updated) == len(self.registry):
                 break
 
-class Note(Entity):
-    """Base class for all vector-embeddable knowledge in the Worldline system.
+class Note(BaseModel):
+    """Base class for all saveable objects in the Worldline system.
 
-    This class serves as the foundation for both the narrative Stack (Worldlines) 
-    and the narrative Heap (Libraries). It builds upon Entity by adding NLP 
-    capabilities, automatically lazily evaluating and caching LLM vector embeddings 
-    and importance scores based on its narrative content.
+    Provides core infrastructure for generating unique IDs, registering the object 
+    with the global Context, and handling pack/unpack serialization.
 
     Attributes:
-        importance (float): The evaluated importance score of the Note.
-        emb (np.ndarray): The vector embedding of the Note.
+        ctx (Context): The global engine context.
+        uid (UID | None): The universally unique identifier for this note.
+        edited (bool): Flag indicating if the note was mutated recently.
     """
-
     model_config = ConfigDict(arbitrary_types_allowed=True)
-    
-    # Private cache fields. Use the properties `importance` and `emb` instead.
-    # These are only passed in manually when loading from a save file on disk.
-    _importance: typing.Optional[float] = PrivateAttr(default=None)
-    _emb: typing.Optional[np.ndarray] = PrivateAttr(default=None)
+    ctx: Context
+    uid: typing.Optional[UID] = None
+    edited: bool = True
 
-    @property
-    def importance(self) -> float:
-        """Lazily evaluates and returns the importance score of the Note.
+    @model_validator(mode="after")
+    def setup(self) -> "Note":
+        """Validates the Note post-initialization.
 
-        Returns:
-            float: The importance score.
-        """
-        if self._importance is None:
-            from worldline.llm import get_importance
-            self._importance = get_importance(self.get_content(False))
-        return self._importance
-
-    @property
-    def emb(self) -> np.ndarray:
-        """Lazily evaluates and returns the vector embedding of the Note.
+        Assigns a unique ID if one was not provided, and registers the note 
+        in the global context registry.
 
         Returns:
-            np.ndarray: The embedding vector.
+            Note: The validated and registered note.
         """
-        if self._emb is None:
-            from worldline.llm import get_emb
-            self._emb = get_emb(self.get_content(False))
-        return self._emb
+        if self.uid is None:
+            self.uid = self.ctx.uid_generator.next()
+        self.ctx.registry[self.uid] = self
+        return self
+
+    def unpack(self, state: dict) -> None:
+        """Restores the Note to a previous state.
+
+        Public API for applying a time-travel or save-file snapshot.
+
+        Args:
+            state (dict): The packed dictionary representation to restore.
+        """
+        if state != self.pack():
+            self._unpack(state)
+
+    def _unpack(self, state: dict) -> None:
+        """Applies a packed state dictionary to internal variables.
+
+        Private implementation. Subclasses MUST override this.
+
+        Args:
+            state (dict): The packed dictionary representation.
+        """
+        return
+
+    def pack(self) -> dict:
+        """Packages the Note's current narrative state into a snapshot.
+
+        Public API for generating a state dictionary for the Delta Log.
+
+        Returns:
+            dict: The serialized state.
+        """
+        return self._pack()
+
+    def _pack(self) -> dict:
+        """Returns a dictionary representation of current narrative variables.
+
+        Private implementation. Subclasses MUST override this. Context and 
+        embeddings should be ignored.
+
+        Returns:
+            dict: The serialized state.
+        """
+        return {}
+
+    def __eq__(self, other) -> bool:
+        """Checks equality against another object.
+
+        Overrides standard equality to prevent Numpy 'ambiguous truth value' crashes.
+        Two Notes are identical if they share the same Unique ID.
+
+        Args:
+            other (Any): The object to compare against.
+
+        Returns:
+            bool: True if the UIDs match, False otherwise.
+        """
+        if not isinstance(other, Note):
+            return False
+        return self.uid == other.uid
 
     def get_content(self, include_uid: bool = True) -> str:
         """Returns the narrative text of this Note for LLM contexts.
@@ -302,13 +270,4 @@ class Note(Entity):
         """
         return ""
 
-    def unpack(self, state: dict) -> None:
-        """Restores the Note to a previous state and clears NLP caches.
-
-        Args:
-            state (dict): The packed dictionary representation to restore.
-        """
-        super().unpack(state)
-        self._importance = None
-        self._emb = None
             
