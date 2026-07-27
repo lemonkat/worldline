@@ -11,7 +11,9 @@ import typing
 import warnings
 
 from pydantic import Field
+import dspy
 
+from worldline.llm import count_sentences
 from worldline.data import Note
 
 class Worldline(Note):
@@ -32,7 +34,7 @@ class Worldline(Note):
     content: typing.Optional[str] = None
     children: list["Worldline"] = Field(default_factory=list)
 
-    def step(self, title: str, content: str) -> None:
+    def beat(self, title: str, content: str) -> None:
         """Adds a single, atomic Beat node to the deepest open Arc.
         
         Args:
@@ -45,7 +47,7 @@ class Worldline(Note):
         if not self.open:
             raise RuntimeError("RuntimeError: Cannot append to a " + ("closed arc" if self.children else "beat") + ".")
         if self.children and not self.children[-1].content:
-            self.children[-1].step(title, content)
+            self.children[-1].beat(title, content)
         else:
             self.children.append(Worldline(ctx=self.ctx, title=title, content=content))
             self.edited = True
@@ -153,7 +155,7 @@ class Worldline(Note):
         """
         # open arc
         if not self.content:
-            out = [self.title, ":"]
+            out = [f"[Worldline] {self.title} (current depth {self.depth}):"]
             for child in self.children if full else self.children[-self.ctx.config.worldline_recall_k:]:
                 for line in child._get_content(full=False).splitlines():
                     out.append("\n    ")
@@ -190,3 +192,98 @@ class Worldline(Note):
             "content": self.content,
             "child_UIDs": [child.uid for child in self.children],
         }
+
+    def _tool_beat(self, title: str, content: str) -> str:
+        """DSPy tool wrapper for appending a beat to the Worldline.
+        
+        Args:
+            title (str): A short title for the beat.
+            content (str): The narrative content of the event.
+            
+        Returns:
+            str: A success message with the new Worldline state, or an error string.
+        """
+        if not self.open:
+            return "Error: Arc closed. No changes have been made."
+        n_sentences = count_sentences(content)
+        if n_sentences > self.ctx.config.worldline_max_entry_size:
+            return f"Error: Content is too long ({n_sentences} sentences). Max length is {self.ctx.config.worldline_max_entry_size} sentences. No changes have been made."
+        self.beat(title, content)
+        return f"Success: Step appended. Worldline state: {self.get_content()}"
+
+    @property
+    def tool_beat(self) -> dspy.Tool:
+        return dspy.Tool(
+            self._tool_beat,
+            f"{self.title} - Beat",
+            "Adds a beat (leaf) entry to this Worldline. Use this for recording individual events or thoughts.",
+            arg_desc={
+                "title": "A short title for this beat.",
+                "content": f"Content for this beat. Reccommended {self.ctx.config.worldline_avg_entry_size} sentences, maximum {self.ctx.config.worldline_max_entry_size} sentences.",
+            }
+        )
+
+    def _tool_dive(self, title: str) -> str:
+        """DSPy tool wrapper for opening a new sub-arc.
+        
+        Args:
+            title (str): The title of the new Arc.
+            
+        Returns:
+            str: A success message with the new Worldline state, or an error string.
+        """
+        if not self.open:
+            return "Error: Arc closed. No changes have been made."
+        if self.depth == self.ctx.config.worldline_max_depth:
+            return f"Error: Worldline already at max depth of {self.depth}. No changes have been made."
+        self.dive(title)
+        return f"Success: Arc diving to level {self.depth} appended. Worldline state: {self.get_content()}"
+
+
+    @property
+    def tool_dive(self) -> dspy.Tool:
+        return dspy.Tool(
+            self._tool_dive,
+            f"{self.title} - Dive",
+            "Adds an Arc entry to this Worldline, diving to the next level of detail.",
+            arg_desc={
+                "title": "A short title for this Arc, succinctly describing what it entails.",
+            }
+        )
+
+    def _tool_surface(self, summary: str) -> str:
+        """DSPy tool wrapper for closing and summarizing the deepest open Arc.
+        
+        Args:
+            summary (str): The generated summary of the completed arc.
+            
+        Returns:
+            str: A success message with the new Worldline state, or an error string.
+        """
+        if not self.open:
+            return "Error: Arc closed. No changes have been made."
+        if self.depth == 0:
+            return "Error: Cannot surface from depth 0. No changes have been made."
+        n_sentences = count_sentences(summary)
+        if n_sentences > self.ctx.config.worldline_max_entry_size:
+            return f"Error: Summary is too long ({n_sentences} sentences). Max length is {self.ctx.config.worldline_max_entry_size} sentences. No changes have been made."
+        self.surface(summary)
+        return f"Success: Arc completed. Worldline state: {self.get_content()}"
+
+    @property
+    def tool_surface(self) -> dspy.Tool:
+        return dspy.Tool(
+            self._tool_surface,
+            f"{self.title} - Surface",
+            "Completes the current sub-arc, adding a summary, and surfacing to the previous depth level.",
+            arg_desc={
+                "summary": f"A summary of the current arc. Make sure to capture all relevant details. Reccommended {self.ctx.config.worldline_avg_entry_size} sentences, maximum {self.ctx.config.worldline_max_entry_size} sentences.",
+            }
+        )
+
+    @property
+    def tools(self) -> list[dspy.Tool]:
+        """Returns a list of DSPy tools exposed by this object."""
+        return [self.tool_beat, self.tool_dive, self.tool_surface]
+
+

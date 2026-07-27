@@ -7,8 +7,8 @@ This module implements the Heap portion of the Fate Engine's memory architecture
 Libraries are collections of Record objects with search-via-ID, 
 search-via-vector-embedding, and create-read-update-delete capabilities.
 The context window loading mechanism is fully stateless between turns, designed specifically 
-for an Auto-RAG (Retrieval-Augmented Generation) loop where the Orchestrator pulls relevant 
-memories at the start of every cognitive cycle.
+for an Auto-RAG (Retrieval-Augmented Generation) loop where relevant memories are pulled
+at the start of every cognitive cycle.
 """
 
 import typing
@@ -16,9 +16,10 @@ import heapq
 
 from pydantic import Field, ConfigDict, PrivateAttr
 import numpy as np
+import dspy
 
 from worldline.uid import UID
-from worldline.llm import get_emb
+from worldline.llm import get_emb, count_sentences
 from worldline.data import Note
 
 class MissingRecordError(Exception):
@@ -88,7 +89,7 @@ class Record(Note):
         Returns:
             str: The formatted narrative string representing this memory.
         """
-        lines = [f"{self.title}:", self.content]
+        lines = [f"[Record] {self.title}:", self.content]
         if self.source: 
             lines.append(f"Source: {self.source}")
         if self.related:
@@ -163,8 +164,7 @@ class Library(Note):
     def refresh(self) -> None:
         """Clears the working memory.
 
-        Should be called by the Orchestrator at the start of every cognitive turn 
-        before Auto-RAG, ensuring the LLM context remains perfectly temporally relevant.
+        Should be called by before any ReAct agents are given tool access.
         """
         self.loaded = {}
 
@@ -316,7 +316,8 @@ class Library(Note):
         Returns:
             str: The concatenated narrative string.
         """
-        lines = [f"Library: {self.title}"] + [record.get_content() for record in records]
+        lines = [f"[Library] {self.title}"]
+        lines.extend(record.get_content() for record in records)
         return "\n".join(lines)
 
     def _get_content(self) -> str:
@@ -329,3 +330,185 @@ class Library(Note):
             str: The formatted working memory of the Library.
         """
         return self.format_records(self.records[uid] for uid in sorted(list(self.loaded.keys()), key=self.loaded.get, reverse=True))
+
+
+    def _tool_recall(self, uid: UID) -> str:
+        """DSPy tool wrapper for manually recalling a specific Record by UID.
+        
+        Args:
+            uid (UID): The unique identifier of the Record to recall.
+            
+        Returns:
+            str: A success message with the formatted Record, or an error string.
+        """
+        if uid not in self.records:
+            return f"Error: No record with UID {uid} could be found. It may have been deleted."
+        return f"Success. Found record: {self.format_records([self.recall(uid)])}"
+
+    @property
+    def tool_recall(self) -> dspy.Tool:
+        return dspy.Tool(
+            self._tool_recall,
+            f"{self.title} - Recall",
+            "Finds a Record given its exact UID.",
+            arg_desc={
+                "uid": "The exact UID of the record. Case-sensitive.",
+            }
+        )
+
+    def _tool_search(self, query: str) -> str:
+        """DSPy tool wrapper for performing an Auto-RAG semantic search.
+        
+        Args:
+            query (str): The search query to embed.
+            
+        Returns:
+            str: A success message with the formatted highest-scoring novel Records.
+        """
+        return f"Success. Found records: {self.format_records(self.search(query, True))}"
+
+    @property
+    def tool_search(self) -> dspy.Tool:
+        return dspy.Tool(
+            self._tool_search,
+            f"{self.title} - Search",
+            f"Find {self.ctx.config.library_search_k} Records via cosine similarity of embedding vectors. Will not return any Records that are already in the context.",
+            arg_desc={
+                "query": "The query to use for the search.",
+            }
+        )
+
+    def _tool_create(self, title: str, content: str, source: str, related: str) -> str:
+        """DSPy tool wrapper for creating a new Record in the Library.
+        
+        Args:
+            title (str): The title of the new Record.
+            content (str): The narrative text.
+            source (str): A description of the origin of this memory ('N/A' for None).
+            related (str): A comma-separated string of related UIDs ('N/A' for None).
+            
+        Returns:
+            str: A success message with the formatted Record, or an error string.
+        """
+        n_sentences = count_sentences(content)
+        if n_sentences > self.ctx.config.library_max_record_size:
+            return f"Error: Content is too long ({n_sentences} sentences). Max length is {self.ctx.config.library_max_record_size} sentences. No changes have been made."
+        related = related.upper().strip()
+        related_UIDs = [] if related == "N/A" else [uid.strip() for uid in related.split(",") if uid.strip()]
+        for uid in related_UIDs:
+            if uid not in self.records:
+                return f"Error: Referenced UID {uid} but no Record with that UID could be found. It may have been deleted. No changes have been made."
+        if len(related_UIDs) > self.ctx.config.library_max_n_refs:
+            return f"Error: Too many Records referenced ({len(related_UIDs)} Records). Max is {self.ctx.config.library_max_n_refs} Records."
+        record = self.create(title, content, None if source.upper().strip() == "N/A" else source, related_UIDs)
+        return f"Success. Created Record: {self.format_records([record])}"
+
+    @property
+    def tool_create(self) -> dspy.Tool:
+        return dspy.Tool(
+            self._tool_create,
+            f"{self.title} - Create",
+            "Create a new Record.",
+            arg_desc={
+                "title": "A title for this Record.",
+                "content": f"The contents of this Record. Reccommended {self.ctx.config.library_avg_record_size} sentences, maximum {self.ctx.config.library_max_record_size} sentences.",
+                "source": "A very short description of how this information came to be. Write 'N/A' to leave empty.",
+                "related": f"UIDs of potentially relevant existing Records. Case-sensitive. Separate by commas, like 'XY12, A1B9, 74J8'. Write 'N/A' to leave empty. Reccommended {self.ctx.config.library_avg_n_refs} references, max {self.ctx.config.library_max_n_refs} references.",
+            }
+        )
+    
+    def _tool_update(self, uid: UID, title: str, content: str, source: str, related: str, append: bool) -> str:
+        """DSPy tool wrapper for modifying an existing Record in working memory.
+        
+        Args:
+            uid (UID): The UID of the Record to modify.
+            title (str): The new title ('N/A' to skip).
+            content (str): The new text content ('N/A' to skip).
+            source (str): The new origin description ('N/A' to skip).
+            related (str): A comma-separated string of new related UIDs ('N/A' to skip).
+            append (bool): If True, appends the new content instead of overwriting.
+            
+        Returns:
+            str: A success message with the formatted Record, or an error string.
+        """
+        if uid not in self.records:
+            return f"Error: No Record with UID {uid} could be found. It may have been deleted. No changes have been made."
+        if uid not in self.loaded:
+            return f"Error: The Record with UID {uid} is not in the context. Recall it first to know what you are updating. No changes have been made."
+
+
+        if append and content.upper() != "N/A":
+            content = self.records[uid].content.strip() + "\n" + content
+
+        n_sentences = count_sentences(content)
+        if n_sentences > self.ctx.config.library_max_record_size:
+            return f"Error: Content is too long ({n_sentences} sentences). Max length is {self.ctx.config.library_max_record_size} sentences. Consider setting append=False and summarizing existing content. No changes have been made."
+
+        related = related.upper().strip()
+        if related == "N/A":
+            related_UIDs = None
+        else:
+            related_UIDs = [uid.strip() for uid in related.split(",") if uid.strip()]
+            for uid in related_UIDs:
+                if uid not in self.records:
+                    return f"Error: Referenced UID {uid} but no Record with that UID could be found. It may have been deleted. No changes have been made."
+            if len(related_UIDs) > self.ctx.config.library_max_n_refs:
+                return f"Error: Too many Records referenced ({len(related_UIDs)} Records). Max is {self.ctx.config.library_max_n_refs} Records."
+        record = self.update(
+            uid, 
+            None if title.upper() == "N/A" else title,
+            None if content.upper() == "N/A" else content,
+            None if source.upper() == "N/A" else source,
+            related_UIDs,
+            False,
+        )
+        return f"Success. Updated Record: {self.format_records([record])}"
+
+    @property
+    def tool_update(self) -> dspy.Tool:
+        return dspy.Tool(
+            self._tool_update,
+            f"{self.title} - Update",
+            "Update an existing Record.",
+            arg_desc={
+                "uid": "The UID of the Record to edit. Case-sensitive. Must be a Record currently in the context.",
+                "title": "The new title for this Record. Write 'N/A' to not edit. Avoid editing this unless necessary.",
+                "content": f"The contents of this Record. Reccommended {self.ctx.config.library_avg_record_size} sentences, maximum {self.ctx.config.library_max_record_size} sentences. Write 'N/A' to not edit.",
+                "source": "A very short description of how this information came to be. Write 'N/A' to not edit. Avoid editing this unless necessary. Will overwrite existing sources.",
+                "related": f"UIDs of potentially relevant existing Records. Case-sensitive. Separate by commas, like 'XY12, A1B9, 74J8'. Write 'N/A' to not edit. Avoid editing this unless necessary. Will overwrite existing references. Reccommended {self.ctx.config.library_avg_n_refs} references, max {self.ctx.config.library_max_n_refs} references.",
+                "append": "Whether or not to append to the existing content or overwrite it. Does nothing if content = 'N/A'.",
+            }
+        )
+
+    def _tool_delete(self, uid: UID) -> str:
+        """DSPy tool wrapper for deleting an existing Record from the Library.
+        
+        Args:
+            uid (UID): The UID of the Record to delete.
+            
+        Returns:
+            str: A success message, or an error string.
+        """
+        if uid not in self.records:
+            return f"Error: No Record with UID {uid} could be found. It may have been deleted. No changes have been made."
+        if uid not in self.loaded:
+            return f"Error: The Record with UID {uid} is not in the context. Recall it first to know what you are deleting. No changes have been made."
+
+        self.delete(uid)
+        return "Success. Record deleted."
+
+    @property
+    def tool_delete(self) -> dspy.Tool:
+        return dspy.Tool(
+            self._tool_delete,
+            f"{self.title} - Delete",
+            "Delete an existing Record.",
+            arg_desc={
+                "uid": "The UID of the Record to delete. Case-sensitive. Must be a Record currently in the context.",
+            }
+        )
+
+    @property
+    def tools(self) -> list[dspy.Tool]:
+        """Returns a list of DSPy tools exposed by this object."""
+        return [self.tool_recall, self.tool_search, self.tool_create, self.tool_update, self.tool_delete]

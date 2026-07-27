@@ -202,3 +202,55 @@ def test_record_equality_numpy_fix(mock_ctx):
     assert record1 == record2
     assert record1 != record3
     assert record1 != "not a record"
+
+def test_library_tools(mock_ctx):
+    lib = Library(ctx=mock_ctx, title="Test Lib")
+    
+    # Test tool_create
+    res_create = lib._tool_create("Record 1", "Content 1.", "N/A", "N/A")
+    assert "Success" in res_create
+    assert len(lib.records) == 1
+    r1_uid = list(lib.records.keys())[0]
+    
+    # Test tool_create with length error
+    long_content = "Sentence. " * (mock_ctx.config.library_max_record_size + 5)
+    res_err = lib._tool_create("Long", long_content, "N/A", "N/A")
+    assert "Error" in res_err
+    
+    # Test tool_recall
+    res_recall = lib._tool_recall(r1_uid)
+    assert "Success" in res_recall
+    assert r1_uid in lib.loaded
+    
+    # Test tool_recall missing
+    res_recall_miss = lib._tool_recall("FAKE")
+    assert "Error" in res_recall_miss
+    
+    # Test tool_search (mock emb)
+    with patch("worldline.library.get_emb") as mock_emb, patch("worldline.llm.get_importance") as mock_imp:
+        mock_emb.return_value = np.array([1.0, 0.0])
+        mock_imp.return_value = 0.5
+        res_search = lib._tool_search("query")
+        assert "Success" in res_search
+        
+    # Test tool_update
+    res_up = lib._tool_update(r1_uid, "N/A", "More content.", "N/A", "N/A", True)
+    assert "Success" in res_up
+    assert "More content" in lib.records[r1_uid].content
+    
+    # Test tool_update unloaded error
+    lib.refresh()
+    res_up_err = lib._tool_update(r1_uid, "N/A", "Content", "N/A", "N/A", True)
+    assert "Error" in res_up_err
+    assert "not in the context" in res_up_err
+    
+    # Test tool_delete
+    lib.recall(r1_uid)
+    res_del = lib._tool_delete(r1_uid)
+    assert "Success" in res_del
+    assert r1_uid not in lib.records
+    
+    # Test tools property
+    tools = lib.tools
+    assert len(tools) == 5
+    assert tools[0].name == "Test Lib - Recall"

@@ -12,6 +12,7 @@ from dataclasses import dataclass, field
 import typing
 
 from pydantic import BaseModel, model_validator, ConfigDict
+import dspy
 
 from worldline.uid import UID, UIDGenerator
 
@@ -175,7 +176,7 @@ class Note(BaseModel):
     edited: bool = True
 
     @model_validator(mode="after")
-    def setup(self) -> "Note":
+    def _setup(self) -> "Note":
         """Validates the Note post-initialization.
 
         Assigns a unique ID if one was not provided, and registers the note 
@@ -268,6 +269,11 @@ class Note(BaseModel):
         Returns:
             str: The narrative text.
         """
-        return ""
+        return "[Note]"
+
+    @property
+    def tools(self) -> list[dspy.Tool]:
+        """Returns a list of DSPy tools exposed by this object."""
+        return []
 
             
