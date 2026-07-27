@@ -1,7 +1,7 @@
 """
 [Phase One: Worldlines]
 
-Call-stack-inspired data structures for recent story events and short-term thought processes.
+Call-stack-inspired data structures for recent story events and short-term thought processes in Project Worldline.
 
 This module implements the Stack portion of the Fate Engine's memory architecture.
 Worldline frames are hierarchical, recursive Note objects that represent ongoing narrative Arcs 

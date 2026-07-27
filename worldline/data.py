@@ -1,7 +1,7 @@
 """
 [Phase Zero: supporting infrastructure]
 
-Core data structures and domain models for the Worldline system.
+Core data structures and domain models for the Project Worldline system.
 
 This module defines the foundational classes for representing narrative time
 and embeddable knowledge entries, utilizing lazy evaluation 
@@ -72,7 +72,15 @@ class Config(BaseModel):
     """
     worldline_recall_k: int = 10
     worldline_max_depth: int = 10
+    worldline_avg_entry_size: int = 3
     worldline_max_entry_size: int = 10
+
+    library_cache_size: int = 30
+    library_search_k: int = 10
+    library_avg_record_size: int = 8
+    library_max_record_size: int = 20
+    library_avg_n_refs: int = 2
+    library_max_n_refs: int = 5
 
 class Entity(BaseModel):
     """Base class for all saveable objects in the Worldline system.
