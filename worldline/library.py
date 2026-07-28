@@ -138,7 +138,7 @@ class Library(Note):
         loaded (dict[UID, float]): Working memory mapping active UIDs to relevance scores.
     """
     title: str = "MAIN"
-    records: dict[UID, Record] = Field(default_factory=dict)
+    records: set[UID] = Field(default_factory=set)
     loaded: dict[UID, float] = Field(default_factory=dict)
 
     def _pack(self) -> dict:
@@ -148,7 +148,7 @@ class Library(Note):
             dict: The state dictionary.
         """
         return {
-            "record_UIDs": list(self.records.keys()),
+            "record_UIDs": list(self.records),
             "loaded_UIDs": self.loaded,
         }
 
@@ -158,7 +158,7 @@ class Library(Note):
         Args:
             state (dict): The dictionary containing the saved state.
         """
-        self.records = {uid: self.ctx.registry[uid] for uid in state["record_UIDs"]}
+        self.records = set(state["record_UIDs"])
         self.loaded = state["loaded_UIDs"]
 
     def refresh(self) -> None:
@@ -188,7 +188,7 @@ class Library(Note):
         if uid not in self.loaded:
             self.loaded[uid] = 1e6 # in case someone sets the weights high, this will probably be higher still
             self.edited = True
-        return self.records[uid]
+        return self.ctx.registry[uid]
 
     def search(self, query: str, mark_loaded: bool = False) -> list[Record]:
         """Performs a semantic and importance-weighted Auto-RAG search.
@@ -206,9 +206,10 @@ class Library(Note):
         """
         query_emb = get_emb(query)
         scores = []
-        for uid, record in self.records.items():
+        for uid in self.records:
             if uid in self.loaded:
                 continue
+            record = self.ctx.registry[uid]
             score_sim = float(np.dot(query_emb, record.emb))
             score_imp = record.importance
             scores.append((score_sim * self.ctx.config.library_search_weight_sim + score_imp * self.ctx.config.library_search_weight_imp, uid))
@@ -216,7 +217,7 @@ class Library(Note):
         if mark_loaded:
             self.loaded.update(found)
             self.edited = True
-        return [self.records[uid] for uid in found]
+        return [self.ctx.registry[uid] for uid in found]
 
     def create(
         self,
@@ -237,7 +238,7 @@ class Library(Note):
             Record: The newly instantiated Record.
         """
         record = Record(ctx=self.ctx, title=title, content=content, source=source, related=related or [])
-        self.records[record.uid] = record
+        self.records.add(record.uid)
         self.edited = True
         return record
 
@@ -268,7 +269,7 @@ class Library(Note):
             UnloadedRecordError: If the Record is not currently loaded in working memory.
         """
         self._verify_loaded(uid)
-        record = self.records[uid]
+        record = self.ctx.registry[uid]
         if title is not None:
             record.title = title
         if content is not None:
@@ -292,7 +293,7 @@ class Library(Note):
             UnloadedRecordError: If the Record is not currently loaded in working memory.
         """
         self._verify_loaded(uid)
-        del self.records[uid]
+        self.records.remove(uid)
         self.edited = True
 
     def _verify_loaded(self, uid: UID) -> None:
@@ -329,7 +330,7 @@ class Library(Note):
         Returns:
             str: The formatted working memory of the Library.
         """
-        return self.format_records(self.records[uid] for uid in sorted(list(self.loaded.keys()), key=self.loaded.get, reverse=True))
+        return self.format_records(self.ctx.registry[uid] for uid in sorted(list(self.loaded.keys()), key=self.loaded.get, reverse=True))
 
 
     def _tool_recall(self, uid: UID) -> str:
@@ -438,7 +439,7 @@ class Library(Note):
 
 
         if append and content.upper() != "N/A":
-            content = self.records[uid].content.strip() + "\n" + content
+            content = self.ctx.registry[uid].content.strip() + "\n" + content
 
         n_sentences = count_sentences(content)
         if n_sentences > self.ctx.config.library_max_record_size:

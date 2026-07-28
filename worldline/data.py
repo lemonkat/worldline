@@ -71,7 +71,6 @@ class Config(BaseModel):
         worldline_avg_entry_size (int): Average text size measured in sentences for Worldline entry contents.
         worldline_max_entry_size (int): Maximum text size measured in sentences for Worldline entry contents.
 
-        library_cache_size (int): Expected maximum number of items in a Library's working memory at once.
         library_search_k (int): The number of novel records returned by an Auto-RAG search.
         library_search_weight_sim (float): The multiplier for semantic cosine similarity when searching.
         library_search_weight_imp (float): The multiplier for intrinsic importance when searching.
@@ -85,7 +84,6 @@ class Config(BaseModel):
     worldline_avg_entry_size: int = 3
     worldline_max_entry_size: int = 10
 
-    library_cache_size: int = 30
     library_search_k: int = 10
     library_search_weight_sim: float = 0.5
     library_search_weight_imp: float = 0.5

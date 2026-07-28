@@ -29,7 +29,7 @@ def test_worldline_beat(mock_ctx):
     root.beat("Action 1", "Did something.")
     
     assert len(root.children) == 1
-    child = root.children[0]
+    child = root[0]
     
     assert child.title == "Action 1"
     assert child.content == "Did something."
@@ -46,7 +46,7 @@ def test_worldline_dive_and_surface(mock_ctx):
     
     root.dive("Arc 1")
     assert len(root.children) == 1
-    arc = root.children[0]
+    arc = root[0]
     
     assert arc.title == "Arc 1"
     assert arc.open is True
@@ -71,13 +71,13 @@ def test_worldline_routing(mock_ctx):
     root = Worldline(ctx=mock_ctx, title="ROOT")
     
     root.dive("Arc 1")
-    arc1 = root.children[0]
+    arc1 = root[0]
     
     root.beat("Action 1", "Inside Arc 1.")
     assert len(arc1.children) == 1
     
     root.dive("Arc 2")
-    arc2 = arc1.children[-1]
+    arc2 = arc1[-1]
     
     root.beat("Action 2", "Inside Arc 2.")
     assert len(arc2.children) == 1
@@ -133,8 +133,8 @@ def test_worldline_pack_unpack(mock_ctx):
     root.dive("Arc 1")
     root.beat("Beat 1", "Action.")
     
-    arc = root.children[0]
-    beat = arc.children[0]
+    arc = root[0]
+    beat = arc[0]
     
     packed_root = root.pack()
     assert packed_root["title"] == "ROOT"
@@ -150,7 +150,7 @@ def test_worldline_pack_unpack(mock_ctx):
     
     assert new_root.title == "ROOT"
     assert len(new_root.children) == 1
-    assert new_root.children[0] is arc
+    assert new_root.children[0] == arc.uid
 
 def test_worldline_get_content(mock_ctx):
     root = Worldline(ctx=mock_ctx, title="ROOT")

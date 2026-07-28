@@ -25,7 +25,7 @@ def test_library_create_update_delete(mock_ctx):
         related=[]
     )
     assert record.uid in library.records
-    assert library.records[record.uid].title == "Apples"
+    assert mock_ctx.registry[record.uid].title == "Apples"
     assert library.edited is True
     
     # Test Update (Unloaded should fail)
@@ -38,13 +38,13 @@ def test_library_create_update_delete(mock_ctx):
     record.edited = False
     
     library.update(uid=record.uid, content=" Wait, some are green.", append=True)
-    assert library.records[record.uid].content == "Apples are red. Wait, some are green."
+    assert mock_ctx.registry[record.uid].content == "Apples are red. Wait, some are green."
     assert library.edited is True
     assert record.edited is True
     
     # Test Overwrite (append=False)
     library.update(uid=record.uid, content="Only green apples.", append=False)
-    assert library.records[record.uid].content == "Only green apples."
+    assert mock_ctx.registry[record.uid].content == "Only green apples."
     
     # Test Delete (Unloaded should fail)
     library.refresh() # Clear loaded
@@ -120,8 +120,8 @@ def test_library_time_travel(mock_ctx):
     library.update(uid=record.uid, title="Future", content=" Next", append=True)
     mock_ctx.record()
     
-    assert library.records[record.uid].title == "Future"
-    assert library.records[record.uid].content == "Start Next"
+    assert mock_ctx.registry[record.uid].title == "Future"
+    assert mock_ctx.registry[record.uid].content == "Start Next"
     # Registry has Library, Record. Page 0 writes both (since edited=True upon creation/recall). Page 1 writes both.
     assert len(mock_ctx.history) == 4 
     
@@ -137,15 +137,15 @@ def test_library_time_travel(mock_ctx):
     mock_ctx.rewind()
     
     assert record.uid in library.records # Un-deleted!
-    assert library.records[record.uid].title == "Future"
-    assert library.records[record.uid].content == "Start Next"
+    assert mock_ctx.registry[record.uid].title == "Future"
+    assert mock_ctx.registry[record.uid].content == "Start Next"
     
     # TIME TRAVEL: REWIND TO PAGE 0
     mock_ctx.page_counter.page = 0
     mock_ctx.rewind()
     
-    assert library.records[record.uid].title == "Origin"
-    assert library.records[record.uid].content == "Start"
+    assert mock_ctx.registry[record.uid].title == "Origin"
+    assert mock_ctx.registry[record.uid].content == "Start"
 
 def test_record_lazy_evaluation(mock_ctx):
     with patch("worldline.llm.get_emb") as mock_emb, patch("worldline.llm.get_importance") as mock_imp:
@@ -210,7 +210,7 @@ def test_library_tools(mock_ctx):
     res_create = lib._tool_create("Record 1", "Content 1.", "N/A", "N/A")
     assert "Success" in res_create
     assert len(lib.records) == 1
-    r1_uid = list(lib.records.keys())[0]
+    r1_uid = list(lib.records)[0]
     
     # Test tool_create with length error
     long_content = "Sentence. " * (mock_ctx.config.library_max_record_size + 5)
@@ -236,7 +236,7 @@ def test_library_tools(mock_ctx):
     # Test tool_update
     res_up = lib._tool_update(r1_uid, "N/A", "More content.", "N/A", "N/A", True)
     assert "Success" in res_up
-    assert "More content" in lib.records[r1_uid].content
+    assert "More content" in mock_ctx.registry[r1_uid].content
     
     # Test tool_update unloaded error
     lib.refresh()

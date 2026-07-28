@@ -13,6 +13,7 @@ import warnings
 from pydantic import Field
 import dspy
 
+from worldline.uid import UID
 from worldline.llm import count_sentences
 from worldline.data import Note
 
@@ -28,11 +29,11 @@ class Worldline(Note):
     Attributes:
         title (str): The title of the Arc or Beat.
         content (str | None): The raw text or summary content. None if the Arc is open.
-        children (list[Worldline]): The ordered list of nested Worldlines.
+        children (list[UID]): The ordered list of UIDs of nested Worldlines.
     """
     title: str = "ROOT"
     content: typing.Optional[str] = None
-    children: list["Worldline"] = Field(default_factory=list)
+    children: list[UID] = Field(default_factory=list)
 
     def beat(self, title: str, content: str) -> None:
         """Adds a single, atomic Beat node to the deepest open Arc.
@@ -46,10 +47,10 @@ class Worldline(Note):
         """
         if not self.open:
             raise RuntimeError("RuntimeError: Cannot append to a " + ("closed arc" if self.children else "beat") + ".")
-        if self.children and not self.children[-1].content:
-            self.children[-1].beat(title, content)
+        if self.children and not self[-1].content:
+            self[-1].beat(title, content)
         else:
-            self.children.append(Worldline(ctx=self.ctx, title=title, content=content))
+            self.children.append(Worldline(ctx=self.ctx, title=title, content=content).uid)
             self.edited = True
 
     def dive(self, title: str) -> None:
@@ -70,10 +71,10 @@ class Worldline(Note):
         if self.depth >= self.ctx.config.worldline_max_depth:
             warnings.warn(f"Diving past maximum depth of {self.ctx.config.worldline_max_depth}.", RuntimeWarning)
         
-        if self.children and not self.children[-1].content:
-            self.children[-1].dive(title)
+        if self.children and not self[-1].content:
+            self[-1].dive(title)
         else:
-            self.children.append(Worldline(ctx=self.ctx, title=title))
+            self.children.append(Worldline(ctx=self.ctx, title=title).uid)
             self.edited = True
 
     def surface(self, content: str) -> None:
@@ -87,8 +88,8 @@ class Worldline(Note):
         """
         if not self.open:
             raise RuntimeError("RuntimeError: Cannot close a " + ("closed arc" if self.children else "beat") + ".")
-        elif self.children and not self.children[-1].content:
-            self.children[-1].surface(content)
+        elif self.children and not self[-1].content:
+            self[-1].surface(content)
         else:
             self.content = content
             self.edited = True
@@ -122,8 +123,8 @@ class Worldline(Note):
         Returns:
             Worldline: The deepest open Arc.
         """
-        if self.children and not self.children[-1].content:
-            return self.children[-1].latest
+        if self.children and not self[-1].content:
+            return self[-1].latest
         return self
 
     @property
@@ -139,7 +140,7 @@ class Worldline(Note):
         if self.content:
             return 0
         elif self.children:
-            return self.children[-1].depth + 1
+            return self[-1].depth + 1
         return 1
 
     def _get_content(self, full: bool = True) -> str:
@@ -156,11 +157,12 @@ class Worldline(Note):
         # open arc
         if not self.content:
             out = [f"[Worldline] {self.title} (current depth {self.depth}):"]
-            for child in self.children if full else self.children[-self.ctx.config.worldline_recall_k:]:
+            for uid in self.children if full else self.children[-self.ctx.config.worldline_recall_k:]:
+                child = self[uid]
                 for line in child._get_content(full=False).splitlines():
                     out.append("\n    ")
                     out.append(line)
-            if not self.children or self.children[-1].content:
+            if not self.children or self[-1].content:
                 out.append("\n>>>")
             return "".join(out)
         # beat or closed arc
@@ -176,7 +178,7 @@ class Worldline(Note):
         """
         self.title = state["title"]
         self.content = state["content"]
-        self.children = [self.ctx.registry[uid] for uid in state["child_UIDs"]]
+        self.children = state["child_UIDs"]
 
 
     def _pack(self) -> dict:
@@ -190,8 +192,13 @@ class Worldline(Note):
         return {
             "title": self.title,
             "content": self.content,
-            "child_UIDs": [child.uid for child in self.children],
+            "child_UIDs": self.children,
         }
+
+    def __getitem__(self, idx: typing.Union[int, UID]) -> "Worldline":
+        if isinstance(idx, int): 
+            return self[self.children[idx]]
+        return self.ctx.registry[idx]
 
     def _tool_beat(self, title: str, content: str) -> str:
         """DSPy tool wrapper for appending a beat to the Worldline.
