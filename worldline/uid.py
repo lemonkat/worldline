@@ -47,7 +47,7 @@ class UIDGenerator:
         Number theory go brrr.
 
         Args:
-            prefix (str | None, optional): A prefix for the ID. Defaults to None (no prefix).
+            prefix (str, optional): A prefix for the ID. Defaults to None (no prefix).
 
         Returns:
             str: a string of ID_SIZE characters from ID_CHARS, guaranteed to be unique for hopefully long enough. Format: [prefix]-[id] if a prefix is provided, else just [id].

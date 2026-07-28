@@ -8,7 +8,10 @@ ensuring that core data structures remain pure and do not have direct
 dependencies on external network calls or AI models.
 """
 
+from __future__ import annotations
+
 import os
+import typing
 import functools
 
 import numpy as np
@@ -17,11 +20,11 @@ import dotenv
 import dspy
 import nltk
 
-GEMINI_API_KEY: str | None = None
-LM_LIGHT: dspy.LM | None = None
-LM_HEAVY: dspy.LM | None = None
-EMB: dspy.Embedder | None = None
-importance: dspy.Predict | None = None
+GEMINI_API_KEY: typing.Optional[str] = None
+LM_LIGHT: typing.Optional[dspy.LM] = None
+LM_HEAVY: typing.Optional[dspy.LM] = None
+EMB: typing.Optional[dspy.Embedder] = None
+importance: typing.Optional[dspy.Predict] = None
 
 def init() -> None:
     """
@@ -65,7 +68,6 @@ def init() -> None:
         )
     )
 
-@functools.lru_cache(maxsize=100)
 def get_importance(text: str) -> float:
     """
     Evaluate the narrative importance of a given text.
@@ -79,19 +81,23 @@ def get_importance(text: str) -> float:
     init()
     return importance(text=text, lm=LM_LIGHT).importance
 
-@functools.lru_cache(maxsize=100)
-def get_emb(text: str | list[str]) -> np.ndarray[np.float32]:
+def get_emb(text: typing.Union[str, list[str]]) -> np.ndarray[np.float32]:
     """
     Generate vector embeddings for the provided text.
 
     Args:
-        text (str | list[str]): A single string or a list of strings to embed.
+        text (str or list[str]): A single string or a list of strings to embed.
 
     Returns:
         np.ndarray[np.float32]: The computed embeddings for the text.
     """
+    if isinstance(text, str):
+        return get_emb([text])[0]
+
     init()
-    return EMB(text)
+    
+    emb = EMB([t or " " for t in text])
+    return np.stack([e if t else np.zeros_like(e) for t, e in zip(text, emb)], axis=0).astype(np.float32)
 
 # Global flag so we only run the download once
 _NLTK_INITIALIZED = False

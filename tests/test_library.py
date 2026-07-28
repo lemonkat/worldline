@@ -47,7 +47,7 @@ def test_library_create_update_delete(mock_ctx):
     assert mock_ctx.registry[record.uid].content == "Only green apples."
     
     # Test Delete (Unloaded should fail)
-    library.refresh() # Clear loaded
+    library.loaded.clear() # Clear loaded
     with pytest.raises(UnloadedRecordError):
         library.delete(uid=record.uid)
         
@@ -56,7 +56,7 @@ def test_library_create_update_delete(mock_ctx):
     library.delete(uid=record.uid)
     assert record.uid not in library.records
 
-def test_library_refresh_and_recall(mock_ctx):
+def test_library_initialize_and_recall(mock_ctx):
     library = Library(ctx=mock_ctx)
     r1 = library.create(title="R1", content="...")
     r2 = library.create(title="R2", content="...")
@@ -66,8 +66,8 @@ def test_library_refresh_and_recall(mock_ctx):
     assert r1.uid in library.loaded
     assert library.loaded[r1.uid] == 1e6
     
-    # Refresh clears working memory
-    library.refresh()
+    # Initialize clears working memory
+    library.loaded.clear()
     assert len(library.loaded) == 0
     assert r1.uid not in library.loaded
     
@@ -239,7 +239,7 @@ def test_library_tools(mock_ctx):
     assert "More content" in mock_ctx.registry[r1_uid].content
     
     # Test tool_update unloaded error
-    lib.refresh()
+    lib.loaded.clear()
     res_up_err = lib._tool_update(r1_uid, "N/A", "Content", "N/A", "N/A", True)
     assert "Error" in res_up_err
     assert "not in the context" in res_up_err
@@ -254,3 +254,18 @@ def test_library_tools(mock_ctx):
     tools = lib.tools
     assert len(tools) == 5
     assert tools[0].name == "Test Lib - Recall"
+
+def test_library_initialize_search(mock_ctx):
+    with patch("worldline.library.get_emb") as mock_emb, patch("worldline.llm.get_importance") as mock_imp:
+        mock_emb.return_value = np.array([1.0, 0.0])
+        mock_imp.return_value = 0.5
+        
+        lib = Library(ctx=mock_ctx, title="Init Lib")
+        r1 = lib.create("Apples", "Red apples")
+        r1._emb = np.array([1.0, 0.0])
+        r1._importance = 0.5
+        
+        # Test that initialize clears and searches automatically
+        content = lib.initialize("I want apples")
+        assert r1.uid in lib.loaded
+        assert "Apples" in content

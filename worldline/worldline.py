@@ -28,7 +28,7 @@ class Worldline(Note):
 
     Attributes:
         title (str): The title of the Arc or Beat.
-        content (str | None): The raw text or summary content. None if the Arc is open.
+        content (str, optional): The raw text or summary content. None if the Arc is open.
         children (list[UID]): The ordered list of UIDs of nested Worldlines.
     """
     title: str = "ROOT"
@@ -143,12 +143,13 @@ class Worldline(Note):
             return self[-1].depth + 1
         return 1
 
-    def _get_content(self, full: bool = True) -> str:
+    def _get_content(self, verbosity: int = 1) -> str:
         """Packages the narrative data into a string for the LLM context window.
         
         Args:
-            full (bool, optional): If True, returns all children (used for the Top Level).
-                         If False, truncates children to the most recent K entries. Defaults to True.
+            verbosity (int, optional): If 0, truncates children to most recent K entries.
+                If 1, returns all children, but children's children and beyond to most recent K entries.
+                If 2 returns all children. Defaults to 1.
                          
         Returns:
             str: A formatted string tree of events, with a `>>>` pointer indicating 
@@ -157,9 +158,9 @@ class Worldline(Note):
         # open arc
         if not self.content:
             out = [f"[Worldline] {self.title} (current depth {self.depth}):"]
-            for uid in self.children if full else self.children[-self.ctx.config.worldline_recall_k:]:
+            for uid in self.children if verbosity > 0 else self.children[-self.ctx.config.worldline_recall_k:]:
                 child = self[uid]
-                for line in child._get_content(full=False).splitlines():
+                for line in child._get_content(2 if verbosity == 2 else 0).splitlines():
                     out.append("\n    ")
                     out.append(line)
             if not self.children or self[-1].content:

@@ -165,7 +165,7 @@ class Note(BaseModel):
 
     Attributes:
         ctx (Context): The global engine context.
-        uid (UID | None): The universally unique identifier for this note.
+        uid (UID, optional): The universally unique identifier for this note. Defaults to creating a new UID from the context's UIDGenerator.
         edited (bool): Flag indicating if the note was mutated recently.
     """
     model_config = ConfigDict(arbitrary_types_allowed=True)
@@ -246,18 +246,19 @@ class Note(BaseModel):
             return False
         return self.uid == other.uid
 
-    def get_content(self, include_uid: bool = True) -> str:
+    def get_content(self, include_uid: bool = True, **kwargs: dict) -> str:
         """Returns the narrative text of this Note for LLM contexts.
         
         Args:
             include_uid (bool, optional): If True, prepends the Note's UID. Defaults to True.
+            **kwargs: Arbitrary keyword arguments passed to the subclass's `_get_content` implementation.
 
         Returns:
             str: The formatted narrative string.
         """
         if include_uid:
-            return f"[UID {self.uid}] {self._get_content()}"
-        return self._get_content()
+            return f"[UID {self.uid}] {self._get_content(**kwargs)}"
+        return self._get_content(**kwargs)
 
     def _get_content(self) -> str:
         """Returns the raw narrative text of this Note.
@@ -273,5 +274,31 @@ class Note(BaseModel):
     def tools(self) -> list[dspy.Tool]:
         """Returns a list of DSPy tools exposed by this object."""
         return []
+
+    def initialize(self, context: str = "", **kwargs: dict) -> str:
+        """Prepares this Note to be used by an Agent using the given context, then returns `self.get_content(**kwargs)`.
+
+        Should be called by before any ReAct agents are given tool access.
+
+        Args:
+            context (str, optional): Context to be used for initialization. Defaults to the empty string.
+            **kwargs: Arbitrary keyword arguments passed to `get_content`.
+
+        Returns:
+            str: The formatted narrative string from `self.get_content()`.
+        """
+        self._initialize(context)
+        return self.get_content(**kwargs)
+
+    def _initialize(self, context: str) -> None:
+        """Prepares this Note to be used by an Agent using the given context.
+
+        Should be called by before any ReAct agents are given tool access.
+        Private implementation. 
+
+        Args:
+            context (str): Context to be used for initialization.
+        """
+        return
 
             

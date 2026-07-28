@@ -11,6 +11,8 @@ for an Auto-RAG (Retrieval-Augmented Generation) loop where relevant memories ar
 at the start of every cognitive cycle.
 """
 
+from __future__ import annotations
+
 import typing
 import heapq
 
@@ -40,7 +42,7 @@ class Record(Note):
     Attributes:
         title (str): A short, descriptive title for the Record.
         content (str): The detailed text of the Record.
-        source (str | None): A text description of the epistemological origin of the Record.
+        source (str, optional): A text description of the epistemological origin of the Record.
         related (list[UID]): A list of UIDs pointing to other associated Records.
     """
     title: str = "UNTITLED"
@@ -53,7 +55,7 @@ class Record(Note):
     # Private cache fields. Use the properties `importance` and `emb` instead.
     # These are only passed in manually when loading from a save file on disk.
     _importance: typing.Optional[float] = PrivateAttr(default=None)
-    _emb: typing.Optional[np.ndarray] = PrivateAttr(default=None)
+    _emb: typing.Optional[np.ndarray[np.float32]] = PrivateAttr(default=None)
 
     @property
     def importance(self) -> float:
@@ -68,7 +70,7 @@ class Record(Note):
         return self._importance
 
     @property
-    def emb(self) -> np.ndarray:
+    def emb(self) -> np.ndarray[np.float32]:
         """Lazily evaluates and returns the vector embedding of the Note.
 
         Returns:
@@ -161,12 +163,18 @@ class Library(Note):
         self.records = set(state["record_UIDs"])
         self.loaded = state["loaded_UIDs"]
 
-    def refresh(self) -> None:
-        """Clears the working memory.
-
+    def _initialize(self, context: str) -> None:
+        """Prepares this Note to be used by an Agent using the given context.
+        
         Should be called by before any ReAct agents are given tool access.
+        Clears working memory and then runs a search on content.
+        Private implementation. 
+
+        Args:
+            context (str): Context to be used for initialization.
         """
         self.loaded = {}
+        self.search(context, True)
 
     def recall(self, uid: UID) -> Record:
         """Manually loads a specific Record into working memory.
@@ -231,8 +239,8 @@ class Library(Note):
         Args:
             title (str): The short title of the Record.
             content (str): The detailed text.
-            source (str | None, optional): Provenance description. Defaults to None.
-            related (list[UID] | None, optional): Pointers to associated Records. Defaults to None.
+            source (str, optional): Provenance description. Defaults to None.
+            related (list[UID], optional): Pointers to associated Records. Defaults to None.
 
         Returns:
             Record: The newly instantiated Record.
@@ -255,10 +263,10 @@ class Library(Note):
 
         Args:
             uid (UID): The UID of the Record to modify.
-            title (str | None, optional): New title. Defaults to None.
-            content (str | None, optional): New content text. Defaults to None.
-            source (str | None, optional): New source description. Defaults to None.
-            related (list[UID] | None, optional): New associative pointers. Defaults to None.
+            title (str, optional): New title. Defaults to None.
+            content (str, optional): New content text. Defaults to None.
+            source (str, optional): New source description. Defaults to None.
+            related (list[UID], optional): New associative pointers. Defaults to None.
             append (bool, optional): If True, appends the new content to the old content. 
                 If False, overwrites the content. Defaults to True.
 

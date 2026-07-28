@@ -1,0 +1,77 @@
+NOTE: This is MY planning document, DO NOT TOUCH THIS UNLESS YOU ARE ME
+
+Figured now that plans_new's contents have been implemented i should figure out what to do next.
+bc honestly i kinda never though the project would survive to this point.
+
+so here goes:
+Phase III: Personas
+represent characters - focus on mental state, physical state is half handled by external system (fate engine probably)
+generic base persona: observe(stuff / info) -> None, initiative() -> int (1 to 10), act() -> float
+options:
+- get an LLM to do it directly
+- player control
+- advanced Persona w/ worldline, library, sketchpad system in full
+
+note: WL-LB-SP system similar to Fate Engine. Combine? Base class?
+FE has WL, LB for main events, independent WL, SP for future plans + thought process documentation
+FE's "observe" takes in what characters do, FE's "act" is what happens (external nice storytelling for reader, and also what each character observes)
+
+but FE handles way more other stuff and so does Persona
+so base class maybe?
+or base function taking in list of Note objects w/ tools and running ReAct w/ some prompt?
+hmm
+
+also need to handle "desyncs" where LLM decides persona will do smth but then another character acts first
+use save/pack system to do revert that sort of thing?
+or just handle it within Persona, ensure that if observe is called twice that no actions get remembered that didnt happen
+that would rely on the LLM to do that though
+
+also independently of all this i might want to set up a UI for integration testing purposes
+using my display_grid TUI library project, make a little thing for editing various types of Notes, w/ basic undo/redo
+should that be done now or should i work on persona first?
+hmm
+decisions
+
+i guess ive partially described phase iv: fate engines already so heres the rest
+WL for story events, WL for plans/thought process, LB for world info, SP for in-the-moment plans / current thought
+list of Personas to activate/deactivate + some way to decide which ones are active (just ask LLM? specialized tool for character-scene entry/exit passed to ReAct?)
+as mentioned way to describe things to characters (functional, no flowery language, potentially long and detail heavy) and see what they do (tool? or end result of each ReAct run? prob latter)
+and also way to describe things to a reader in a way that's good writing and stuff
+maybe configurable description prompts that are persona-specific, so player persona gets nice descriptions and blind characters don't get visuals?
+
+ok so each Persona has a desc_config string which is smth like "Describe as if telling a story, use figurative language in the right way and stuff" or "provide a purely functional description, add lots of detail but avoid metaphors and just say it all directly" or smth
+agent.py contains run_agent(ctx: Context, notes: list[UID], tools: list[dspy.Tool], task: dspy.Signature) -> smth
+actually maybe it's better if we have a WorldlineAgent class which subclasses dspy.Module, and takes in the context, notes, and tools in the constructor?
+anyways whatever it is, when it's run it runs get context on every note (flushing and searching via existing context for Libraries before calling their get context), then gives a ReAct agent the tools, signature, and context and lets it do its thing
+
+signatures that might be used:
+
+for Personas:
+observe(scene: str): initiative (int 1-10), short desc of action (str) - this is where planned action will be stored, not in anywhere else
+act(): full desc of action (str)
+
+for Fate Engine:
+turn(): scenes (dict[UID of persona, str])
+turn(persona_uid: UID, action: str): scenes (dict[UID of persona, str])
+write(): scene (str)
+
+oh also
+what if an agent wants info that should exist but doesnt?
+need fate engine to make smth up on the fly
+agents get lookup() tool to call if they need info and really can't find it
+lookup() then calls some fate engine method, maybe spins up another agent (hopefully no deadlocks or race conditions or other nonsense occurs but we'll need to be careful) and returns a string with the info (also records it in primary Library if it's not there yet either)
+so ig persona lookup tool searches in fate engine library, fate engine lookup tool still searches in that library but then creates smth new and puts it in fate engine library
+if this new info that should have been common knowledge is requested by another Persona later, FE library will have it and persona lookup will find it there ig
+wait can persona lookup just = FE library search? (but like not touching loaded, so ig a few diffs)
+
+ok so TUI things
+display_grid module w/ Note list of dspy.Tool objects (i'd rather keep these separate so certain extra tools can be added/removed)
+well two modules
+one just displays a Note's content
+the other displays tool output and lets you select and call tools
+theming?
+could go real basic (-+=| for lines, black and white)
+could go with a simple color palette (dunno what it'd be) (does displaygrid need a better color palette system?) + all sharp corners, color change = border
+could do smth fancier with unicode box-drawing chars too
+make it look all hackery-y with # for lines, green on black?
+changeable theme system? (might be good for displaygrid to have in general but gonna be kinda hard to make)

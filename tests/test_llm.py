@@ -1,4 +1,5 @@
 import pytest
+import numpy as np
 from unittest.mock import patch, MagicMock
 import worldline.llm as llm
 
@@ -43,9 +44,6 @@ def test_get_importance(mock_init):
     llm.importance = mock_importance_module
     llm.LM_LIGHT = "mock_lm_light"
     
-    # Clear lru_cache for testing
-    llm.get_importance.cache_clear()
-    
     result = llm.get_importance("Test text")
     
     assert result == 0.95
@@ -55,18 +53,15 @@ def test_get_importance(mock_init):
 @patch("worldline.llm.init")
 def test_get_emb(mock_init):
     mock_emb_module = MagicMock()
-    mock_emb_module.return_value = [0.1, 0.2, 0.3]
+    mock_emb_module.return_value = [[0.1, 0.2, 0.3]]
     
     llm.EMB = mock_emb_module
     
-    # Clear lru_cache for testing
-    llm.get_emb.cache_clear()
-    
     result = llm.get_emb("Test text")
     
-    assert result == [0.1, 0.2, 0.3]
+    assert np.allclose(result, [0.1, 0.2, 0.3])
     mock_init.assert_called_once()
-    mock_emb_module.assert_called_once_with("Test text")
+    mock_emb_module.assert_called_once_with(["Test text"])
 
 @patch("nltk.download")
 def test_count_sentences(mock_download):
