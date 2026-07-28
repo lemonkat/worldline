@@ -44,7 +44,7 @@ retroactive summarization might help but might be complicated
 acts like a dictionary - lookup, insert, update, delete
 library entries (pages?) have ID, title, content, importance score
 lookup can be by direct ID or embdeding vector
-update is either rewrite or append, depending on necessity, system will reccommend that the AI summarizes content or splits the entry if it hits a certain size threshold
+update is either rewrite or append, depending on necessity, system will recommend that the AI summarizes content or splits the entry if it hits a certain size threshold
 AI will be told to update with marking saying why non relevant when possible instead of deleting
 "garbage collection" will run if heap gets "full" (not sure if this needs to happen that often) but that will combine like entries, summarize them, delete completely useless ones
 

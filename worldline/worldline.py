@@ -219,7 +219,7 @@ class Worldline(Note):
             "Adds a beat (leaf) entry to this Worldline. Use this for recording individual events or thoughts.",
             arg_desc={
                 "title": "A short title for this beat.",
-                "content": f"Content for this beat. Reccommended {self.ctx.config.worldline_avg_entry_size} sentences, maximum {self.ctx.config.worldline_max_entry_size} sentences.",
+                "content": f"Content for this beat. Recommended {self.ctx.config.worldline_avg_entry_size} sentences, maximum {self.ctx.config.worldline_max_entry_size} sentences.",
             }
         )
 
@@ -277,7 +277,7 @@ class Worldline(Note):
             f"{self.title} - Surface",
             "Completes the current sub-arc, adding a summary, and surfacing to the previous depth level.",
             arg_desc={
-                "summary": f"A summary of the current arc. Make sure to capture all relevant details. Reccommended {self.ctx.config.worldline_avg_entry_size} sentences, maximum {self.ctx.config.worldline_max_entry_size} sentences.",
+                "summary": f"A summary of the current arc. Make sure to capture all relevant details. Recommended {self.ctx.config.worldline_avg_entry_size} sentences, maximum {self.ctx.config.worldline_max_entry_size} sentences.",
             }
         )
 

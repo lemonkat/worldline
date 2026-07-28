@@ -411,9 +411,9 @@ class Library(Note):
             "Create a new Record.",
             arg_desc={
                 "title": "A title for this Record.",
-                "content": f"The contents of this Record. Reccommended {self.ctx.config.library_avg_record_size} sentences, maximum {self.ctx.config.library_max_record_size} sentences.",
+                "content": f"The contents of this Record. Recommended {self.ctx.config.library_avg_record_size} sentences, maximum {self.ctx.config.library_max_record_size} sentences.",
                 "source": "A very short description of how this information came to be. Write 'N/A' to leave empty.",
-                "related": f"UIDs of potentially relevant existing Records. Case-sensitive. Separate by commas, like 'XY12, A1B9, 74J8'. Write 'N/A' to leave empty. Reccommended {self.ctx.config.library_avg_n_refs} references, max {self.ctx.config.library_max_n_refs} references.",
+                "related": f"UIDs of potentially relevant existing Records. Case-sensitive. Separate by commas, like 'XY12, A1B9, 74J8'. Write 'N/A' to leave empty. Recommended {self.ctx.config.library_avg_n_refs} references, max {self.ctx.config.library_max_n_refs} references.",
             }
         )
     
@@ -473,9 +473,9 @@ class Library(Note):
             arg_desc={
                 "uid": "The UID of the Record to edit. Case-sensitive. Must be a Record currently in the context.",
                 "title": "The new title for this Record. Write 'N/A' to not edit. Avoid editing this unless necessary.",
-                "content": f"The contents of this Record. Reccommended {self.ctx.config.library_avg_record_size} sentences, maximum {self.ctx.config.library_max_record_size} sentences. Write 'N/A' to not edit.",
+                "content": f"The contents of this Record. Recommended {self.ctx.config.library_avg_record_size} sentences, maximum {self.ctx.config.library_max_record_size} sentences. Write 'N/A' to not edit.",
                 "source": "A very short description of how this information came to be. Write 'N/A' to not edit. Avoid editing this unless necessary. Will overwrite existing sources.",
-                "related": f"UIDs of potentially relevant existing Records. Case-sensitive. Separate by commas, like 'XY12, A1B9, 74J8'. Write 'N/A' to not edit. Avoid editing this unless necessary. Will overwrite existing references. Reccommended {self.ctx.config.library_avg_n_refs} references, max {self.ctx.config.library_max_n_refs} references.",
+                "related": f"UIDs of potentially relevant existing Records. Case-sensitive. Separate by commas, like 'XY12, A1B9, 74J8'. Write 'N/A' to not edit. Avoid editing this unless necessary. Will overwrite existing references. Recommended {self.ctx.config.library_avg_n_refs} references, max {self.ctx.config.library_max_n_refs} references.",
                 "append": "Whether or not to append to the existing content or overwrite it. Does nothing if content = 'N/A'.",
             }
         )
