@@ -127,10 +127,11 @@ def test_context_concurrency(mock_ctx):
 
     def worker():
         for _ in range(100):
-            mock_ctx.page_counter.step()
-            note = MockNote(ctx=mock_ctx, text="Concurrency test")
-            note.edited = True
-            mock_ctx.record()
+            with mock_ctx.lock:
+                mock_ctx.page_counter.step()
+                note = MockNote(ctx=mock_ctx, text="Concurrency test")
+                note.edited = True
+                mock_ctx.record()
 
     threads = [threading.Thread(target=worker) for _ in range(10)]
     for t in threads:

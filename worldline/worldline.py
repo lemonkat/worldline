@@ -35,6 +35,9 @@ class Worldline(Note):
     content: typing.Optional[str] = None
     children: list[UID] = Field(default_factory=list)
 
+    sys_name: typing.ClassVar[str] = "Worldline"
+    sys_desc: typing.ClassVar[str] = "A hierarchical stack representing recent events or thoughts. You can append atomic Beats, Dive into new nested Arcs to handle sub-tasks, and Surface to summarize completed Arcs."
+
     def beat(self, name: str, content: str) -> None:
         """Adds a single, atomic Beat node to the deepest open Arc.
         

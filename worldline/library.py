@@ -45,10 +45,13 @@ class Record(Note):
         source (str, optional): A text description of the epistemological origin of the Record.
         related (list[UID]): A list of UIDs pointing to other associated Records.
     """
-    name: str = "UNTITLED"
+    name: str = "Unnamed"
     content: str = ""
     source: typing.Optional[str] = None
     related: list[UID] = Field(default_factory=list)
+
+    sys_name: typing.ClassVar[str] = "Record"
+    sys_desc: typing.ClassVar[str] = "A discrete unit of semantic memory or lore. You can recall Records by UID, or use the Library's search tools to find them."
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
         
@@ -142,6 +145,9 @@ class Library(Note):
     name: str = "MAIN"
     records: set[UID] = Field(default_factory=set)
     loaded: dict[UID, float] = Field(default_factory=dict)
+
+    sys_name: typing.ClassVar[str] = "Library"
+    sys_desc: typing.ClassVar[str] = "A collection of long-term memories (Records). You must explicitly search or recall records to load them into working memory before you can read, update, or delete them."
 
     def _pack(self) -> dict:
         """Serializes the Library's specific fields into a dictionary.

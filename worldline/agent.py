@@ -77,12 +77,28 @@ class WorldlineAgent(dspy.Module):
 
         
     def _build_note_desc(self) -> str:
+        """Dynamically constructs instructions based on active Note types.
+
+        Iterates through the distinct types of provided Notes and concatenates 
+        their `sys_name` and `sys_desc` to instruct the LLM on how to use them.
+
+        Returns:
+            str: The formatted system instructions string.
+        """
         result = []
         for note_type in {type(note) for note in self.notes}:
             result.append(f"Details for {note_type.sys_name}: {note_type.sys_desc}")
         return "\n\n".join(result)
 
     def _build_context(self) -> str:
+        """Assembles the initial context block from all active Notes.
+
+        Calls the `initialize` method on each Note (which includes formatting 
+        and injecting previous context) to build the comprehensive world state.
+
+        Returns:
+            str: The fully assembled context string.
+        """
         context = ""
         for note in self.notes:
             context += "\n\n" + note.initialize(context)
