@@ -31,7 +31,7 @@ class Worldline(Note):
         content (str, optional): The raw text or summary content. None if the Arc is open.
         children (list[UID]): The ordered list of UIDs of nested Worldlines.
     """
-    name: str = "ROOT"
+    name: str = "Unnamed Worldline"
     content: typing.Optional[str] = None
     children: list[UID] = Field(default_factory=list)
 
@@ -48,13 +48,14 @@ class Worldline(Note):
         Raises:
             RuntimeError: If the Worldline (or the deepest Arc) is already closed.
         """
-        if not self.open:
-            raise RuntimeError("RuntimeError: Cannot append to a " + ("closed arc" if self.children else "beat") + ".")
-        if self.children and not self[-1].content:
-            self[-1].beat(name, content)
-        else:
-            self.children.append(Worldline(ctx=self.ctx, name=name, content=content).uid)
-            self.edited = True
+        with self.lock:
+            if not self.open:
+                raise RuntimeError("RuntimeError: Cannot append to a " + ("closed arc" if self.children else "beat") + ".")
+            if self.children and not self[-1].content:
+                self[-1].beat(name, content)
+            else:
+                self.children.append(Worldline(ctx=self.ctx, name=name, content=content).uid)
+                self.edited = True
 
     def dive(self, name: str) -> None:
         """Opens a new nested Arc within the deepest open Arc.
@@ -68,17 +69,18 @@ class Worldline(Note):
         Warns:
             RuntimeWarning: If opening the new Arc would exceed worldline_max_depth.
         """
-        if not self.open:
-            raise RuntimeError("RuntimeError: Cannot append to a " + ("closed arc" if self.children else "beat") + ".")
-        
-        if self.depth >= self.ctx.config.worldline_max_depth:
-            warnings.warn(f"Diving past maximum depth of {self.ctx.config.worldline_max_depth}.", RuntimeWarning)
-        
-        if self.children and not self[-1].content:
-            self[-1].dive(name)
-        else:
-            self.children.append(Worldline(ctx=self.ctx, name=name).uid)
-            self.edited = True
+        with self.lock:
+            if not self.open:
+                raise RuntimeError("RuntimeError: Cannot append to a " + ("closed arc" if self.children else "beat") + ".")
+            
+            if self.depth >= self.ctx.config.worldline_max_depth:
+                warnings.warn(f"Diving past maximum depth of {self.ctx.config.worldline_max_depth}.", RuntimeWarning)
+            
+            if self.children and not self[-1].content:
+                self[-1].dive(name)
+            else:
+                self.children.append(Worldline(ctx=self.ctx, name=name).uid)
+                self.edited = True
 
     def surface(self, content: str) -> None:
         """Closes the deepest open Arc by populating its summary content.
@@ -89,13 +91,14 @@ class Worldline(Note):
         Raises:
             RuntimeError: If the Worldline is already closed, meaning there are no open Arcs left.
         """
-        if not self.open:
-            raise RuntimeError("RuntimeError: Cannot close a " + ("closed arc" if self.children else "beat") + ".")
-        elif self.children and not self[-1].content:
-            self[-1].surface(content)
-        else:
-            self.content = content
-            self.edited = True
+        with self.lock:
+            if not self.open:
+                raise RuntimeError("RuntimeError: Cannot close a " + ("closed arc" if self.children else "beat") + ".")
+            elif self.children and not self[-1].content:
+                self[-1].surface(content)
+            else:
+                self.content = content
+                self.edited = True
 
     @property
     def open(self) -> bool:
@@ -126,9 +129,10 @@ class Worldline(Note):
         Returns:
             Worldline: The deepest open Arc.
         """
-        if self.children and not self[-1].content:
-            return self[-1].latest
-        return self
+        with self.lock:
+            if self.children and not self[-1].content:
+                return self[-1].latest
+            return self
 
     @property
     def depth(self) -> int:
@@ -140,37 +144,39 @@ class Worldline(Note):
         Returns:
             int: The depth of the open stack.
         """
-        if self.content:
-            return 0
-        elif self.children:
-            return self[-1].depth + 1
-        return 1
+        with self.lock:
+            if self.content:
+                return 0
+            elif self.children:
+                return self[-1].depth + 1
+            return 1
 
     def _get_content(self, verbosity: int = 1) -> str:
         """Packages the narrative data into a string for the LLM context window.
         
         Args:
-            verbosity (int, optional): If 0, truncates children to most recent K entries.
-                If 1, returns all children, but children's children and beyond to most recent K entries.
-                If 2 returns all children. Defaults to 1.
+            verbosity (int, optional): If 0, truncates children to most recent K entries and does not display depth.
+                If 1, returns all children and displays depth, but children's children and beyond are limited to most recent K entries and do not display depth.
+                If 2, returns all children and displays depth. Defaults to 1.
                          
         Returns:
             str: A formatted string tree of events, with a `>>>` pointer indicating 
                  the active injection point for the next event.
         """
-        # open arc
-        if not self.content:
-            out = [f"[Worldline] {self.name} (current depth {self.depth}):"]
-            for uid in self.children if verbosity > 0 else self.children[-self.ctx.config.worldline_recall_k:]:
-                child = self[uid]
-                for line in child._get_content(2 if verbosity == 2 else 0).splitlines():
-                    out.append("\n    ")
-                    out.append(line)
-            if not self.children or self[-1].content:
-                out.append("\n>>>")
-            return "".join(out)
-        # beat or closed arc
-        return f"{self.name}: {self.content}"
+        with self.lock:
+            # open arc
+            if not self.content:
+                out = [f"[Worldline] {self.name} (current depth {self.depth}):" if verbosity > 0 else f"{self.name}:"]
+                for uid in self.children if verbosity > 0 else self.children[-self.ctx.config.worldline_recall_k:]:
+                    child = self[uid]
+                    for line in child._get_content(2 if verbosity == 2 else 0).splitlines():
+                        out.append("\n    ")
+                        out.append(line)
+                if not self.children or self[-1].content:
+                    out.append("\n>>>")
+                return "".join(out)
+            # beat or closed arc
+            return f"{self.name}: {self.content}"
 
     def _unpack(self, state: dict) -> None:
         """Applies a packed state dictionary to internal variables.

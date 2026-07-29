@@ -20,14 +20,15 @@ class Sketchpad(Note):
         name (str): The name of the Sketchpad.
         content (str): The editable text content.
     """
-    name: str = "Unnamed"
+    name: str = "Unnamed Sketchpad"
     content: str = ""
 
     sys_name: typing.ClassVar[str] = "Sketchpad"
     sys_desc: typing.ClassVar[str] = "A temporary text field that persists across turns. Use the write tool to store notes, reminders, or intermediate plans."
 
     def _get_content(self) -> str:
-        return f"[Sketchpad] {self.name}: {self.content}"
+        with self.lock:
+            return f"[Sketchpad] {self.name}: {self.content}"
 
     def _unpack(self, state: dict) -> None:
         """Applies a packed state dictionary to internal variables.
@@ -68,8 +69,9 @@ class Sketchpad(Note):
         Returns:
             str: A success message indicating the content was updated.
         """
-        self.content = content
-        self.edited = True
+        with self.lock:
+            self.content = content
+            self.edited = True
         return "Content updated successfully."
 
     @property
@@ -78,4 +80,7 @@ class Sketchpad(Note):
             self._tool_write,
             f"{self.name} - Write",
             "Sets the content of this Sketchpad.",
+            arg_desc={
+                "content": "Content to write.",
+            }
         )

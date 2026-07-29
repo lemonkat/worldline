@@ -45,7 +45,7 @@ class Record(Note):
         source (str, optional): A text description of the epistemological origin of the Record.
         related (list[UID]): A list of UIDs pointing to other associated Records.
     """
-    name: str = "Unnamed"
+    name: str = "Unnamed Record"
     content: str = ""
     source: typing.Optional[str] = None
     related: list[UID] = Field(default_factory=list)
@@ -129,6 +129,24 @@ class Record(Note):
         self._importance = None
         self._emb = None
 
+    @classmethod
+    def batch_gen(cls, records: list[Record]) -> None:
+        """Computes embeddings and importances for a batch of records concurrently.
+        
+        Args:
+            records (list[Record]): The list of records to generate cache fields for.
+        """
+        to_update = [(record, record.get_content(include_uid=False)) for record in records if record._importance is None or record._emb is None]
+        if to_update:
+            from worldline.llm import get_importance, get_emb
+            embeddings = get_emb([c for r, c in to_update])
+            importances = get_importance([c for r, c in to_update])
+            for (r, c), e, i in zip(to_update, embeddings, importances):
+                if r._emb is None:
+                    r._emb = e.copy()
+                if r._importance is None:
+                    r._importance = i
+
 class Library(Note):
     """A collection of long-term semantic memories (Records).
 
@@ -142,7 +160,7 @@ class Library(Note):
         records (dict[UID, Record]): The master database of all contained records.
         loaded (dict[UID, float]): Working memory mapping active UIDs to relevance scores.
     """
-    name: str = "MAIN"
+    name: str = "Unnamed Library"
     records: set[UID] = Field(default_factory=set)
     loaded: dict[UID, float] = Field(default_factory=dict)
 
@@ -181,8 +199,9 @@ class Library(Note):
         Args:
             context (str): Context to be used for initialization.
         """
-        self.loaded = {}
-        self.search(context, True)
+        with self.lock:
+            self.loaded = {}
+            self.search(context, True)
 
     def recall(self, uid: UID) -> Record:
         """Manually loads a specific Record into working memory.
@@ -199,12 +218,13 @@ class Library(Note):
         Raises:
             MissingRecordError: If the UID does not exist in the Library.
         """
-        if uid not in self.records:
-            raise MissingRecordError(f"No record found with UID {uid}.")
-        if uid not in self.loaded:
-            self.loaded[uid] = 1e6 # in case someone sets the weights high, this will probably be higher still
-            self.edited = True
-        return self.ctx.registry[uid]
+        with self.lock:
+            if uid not in self.records:
+                raise MissingRecordError(f"No record found with UID {uid}.")
+            if uid not in self.loaded:
+                self.loaded[uid] = 1e6 # in case someone sets the weights high, this will probably be higher still
+                self.edited = True
+            return self.ctx.registry[uid]
 
     def search(self, query: str, mark_loaded: bool = False) -> list[Record]:
         """Performs a semantic and importance-weighted Auto-RAG search.
@@ -221,19 +241,21 @@ class Library(Note):
             list[Record]: The highest scoring novel Records, up to `library_search_k`.
         """
         query_emb = get_emb(query)
-        scores = []
-        for uid in self.records:
-            if uid in self.loaded:
-                continue
-            record = self.ctx.registry[uid]
-            score_sim = float(np.dot(query_emb, record.emb))
-            score_imp = record.importance
-            scores.append((score_sim * self.ctx.config.library_search_weight_sim + score_imp * self.ctx.config.library_search_weight_imp, uid))
-        found = {uid: score for score, uid in heapq.nlargest(self.ctx.config.library_search_k, scores)}
-        if mark_loaded:
-            self.loaded.update(found)
-            self.edited = True
-        return [self.ctx.registry[uid] for uid in found]
+        with self.lock:
+            scores = []
+            Record.batch_gen([self.ctx.registry[uid] for uid in self.records if uid not in self.loaded])
+            for uid in self.records:
+                if uid in self.loaded:
+                    continue
+                record = self.ctx.registry[uid]
+                score_sim = float(np.dot(query_emb, record.emb))
+                score_imp = record.importance
+                scores.append((score_sim * self.ctx.config.library_search_weight_sim + score_imp * self.ctx.config.library_search_weight_imp, uid))
+            found = {uid: score for score, uid in heapq.nlargest(self.ctx.config.library_search_k, scores)}
+            if mark_loaded:
+                self.loaded.update(found)
+                self.edited = True
+            return [self.ctx.registry[uid] for uid in found]
 
     def create(
         self,
@@ -253,10 +275,11 @@ class Library(Note):
         Returns:
             Record: The newly instantiated Record.
         """
-        record = Record(ctx=self.ctx, name=name, content=content, source=source, related=related or [])
-        self.records.add(record.uid)
-        self.edited = True
-        return record
+        with self.lock:
+            record = Record(ctx=self.ctx, name=name, content=content, source=source, related=related or [])
+            self.records.add(record.uid)
+            self.edited = True
+            return record
 
     def update(
         self, 
@@ -284,20 +307,21 @@ class Library(Note):
         Raises:
             UnloadedRecordError: If the Record is not currently loaded in working memory.
         """
-        self._verify_loaded(uid)
-        record = self.ctx.registry[uid]
-        if name is not None:
-            record.name = name
-        if content is not None:
-            record.content = record.content + content if append else content
-        if source is not None:
-            record.source = source
-        if related is not None:
-            record.related = related
+        with self.lock:
+            self._verify_loaded(uid)
+            record = self.ctx.registry[uid]
+            if name is not None:
+                record.name = name
+            if content is not None:
+                record.content = record.content + content if append else content
+            if source is not None:
+                record.source = source
+            if related is not None:
+                record.related = related
 
-        self.edited = True
-        record.edited = True
-        return record
+            self.edited = True
+            record.edited = True
+            return record
 
     def delete(self, uid: UID) -> None:
         """Permanently removes a Record from the Library.
@@ -308,9 +332,10 @@ class Library(Note):
         Raises:
             UnloadedRecordError: If the Record is not currently loaded in working memory.
         """
-        self._verify_loaded(uid)
-        self.records.remove(uid)
-        self.edited = True
+        with self.lock:
+            self._verify_loaded(uid)
+            self.records.remove(uid)
+            self.edited = True
 
     def _verify_loaded(self, uid: UID) -> None:
         """Internal helper to enforce read/write authorization.
@@ -333,9 +358,10 @@ class Library(Note):
         Returns:
             str: The concatenated narrative string.
         """
-        lines = [f"[Library] {self.name}"]
-        lines.extend(record.get_content() for record in records)
-        return "\n".join(lines)
+        with self.lock:
+            lines = [f"[Library] {self.name}:"]
+            lines.extend(record.get_content() for record in records)
+            return "\n".join(lines)
 
     def _get_content(self) -> str:
         """Generates the context window prompt for the Library.
@@ -346,7 +372,8 @@ class Library(Note):
         Returns:
             str: The formatted working memory of the Library.
         """
-        return self.format_records(self.ctx.registry[uid] for uid in sorted(list(self.loaded.keys()), key=self.loaded.get, reverse=True))
+        with self.lock:
+            return self.format_records(self.ctx.registry[uid] for uid in sorted(list(self.loaded.keys()), key=self.loaded.get, reverse=True))
 
 
     def _tool_recall(self, uid: UID) -> str:

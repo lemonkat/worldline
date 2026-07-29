@@ -6,6 +6,7 @@ dspy @ git+https://github.com/stanfordnlp/dspy.git
 numpy
 pydantic
 python-dotenv
+sentence-transformers
 
 # --- Testing Dependencies ---
 pytest

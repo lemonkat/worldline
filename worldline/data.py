@@ -11,6 +11,7 @@ for LLM-derived attributes to avoid circular dependencies.
 from dataclasses import dataclass, field
 import typing
 import threading
+import copy
 
 from pydantic import BaseModel, model_validator, ConfigDict
 import dspy
@@ -204,8 +205,9 @@ class Note(BaseModel):
         Args:
             state (dict): The packed dictionary representation to restore.
         """
-        if state != self.pack():
-            self._unpack(state)
+        with self.lock:
+            if state != self.pack():
+                self._unpack(copy.deepcopy(state))
 
     def _unpack(self, state: dict) -> None:
         """Applies a packed state dictionary to internal variables.
@@ -225,7 +227,8 @@ class Note(BaseModel):
         Returns:
             dict: The serialized state.
         """
-        return self._pack()
+        with self.lock:
+            return copy.deepcopy(self._pack())
 
     def _pack(self) -> dict:
         """Returns a dictionary representation of current narrative variables.

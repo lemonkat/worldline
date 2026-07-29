@@ -269,3 +269,24 @@ def test_library_initialize_search(mock_ctx):
         content = lib.initialize("I want apples")
         assert r1.uid in lib.loaded
         assert "Apples" in content
+        
+def test_record_batch_gen(mock_ctx):
+    with patch("worldline.llm.get_emb") as mock_emb, patch("worldline.llm.get_importance") as mock_imp:
+        # get_emb returns a 2D array
+        mock_emb.return_value = np.array([[1.0, 0.0], [0.0, 1.0]])
+        # get_importance returns a list of floats
+        mock_imp.return_value = [0.8, 0.9]
+        
+        r1 = Record(ctx=mock_ctx, name="A")
+        r2 = Record(ctx=mock_ctx, name="B")
+        
+        # Call batch_gen
+        Record.batch_gen([r1, r2])
+        
+        # Verify cache fields are populated properly
+        mock_emb.assert_called_once()
+        mock_imp.assert_called_once()
+        assert np.array_equal(r1._emb, np.array([1.0, 0.0]))
+        assert np.array_equal(r2._emb, np.array([0.0, 1.0]))
+        assert r1._importance == 0.8
+        assert r2._importance == 0.9
