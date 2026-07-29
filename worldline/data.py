@@ -40,7 +40,6 @@ class PageCounter:
             start (Page, optional): The initial page number. Defaults to 0.
         """
         self.page = start
-        self.lock = threading.RLock()
 
     def step(self) -> Page:
         """
@@ -49,9 +48,8 @@ class PageCounter:
         Returns:
             Page: The new current page number.
         """
-        with self.lock:
-            self.page += 1
-            return self.page
+        self.page += 1
+        return self.page
     
     def __str__(self) -> str:
         return f"Page {self.page}"
