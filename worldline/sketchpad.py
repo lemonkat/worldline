@@ -1,8 +1,10 @@
 """
 [Phase 0.5: Sketchpads]
 
-Minimal Note objects w/ title, editable content for simple tasks.
+Minimal Note objects w/ name, editable content for simple tasks.
 """
+
+import typing
 
 import dspy
 
@@ -15,14 +17,17 @@ class Sketchpad(Note):
     or temporary scratchpad thoughts that persist across turns.
     
     Attributes:
-        title (str): The title of the Sketchpad.
+        name (str): The name of the Sketchpad.
         content (str): The editable text content.
     """
-    title: str = "Untitled"
+    name: str = "Unnamed"
     content: str = ""
 
+    sys_name: typing.ClassVar[str] = "Sketchpad"
+    sys_desc: typing.ClassVar[str] = "A temporary text field that persists across turns. Use the write tool to store notes, reminders, or intermediate plans."
+
     def _get_content(self) -> str:
-        return f"[Sketchpad] {self.title}: {self.content}"
+        return f"[Sketchpad] {self.name}: {self.content}"
 
     def _unpack(self, state: dict) -> None:
         """Applies a packed state dictionary to internal variables.
@@ -32,7 +37,7 @@ class Sketchpad(Note):
         Args:
             state (dict): The packed dictionary representation.
         """
-        self.title = state["title"]
+        self.name = state["name"]
         self.content = state["content"]
 
 
@@ -45,7 +50,7 @@ class Sketchpad(Note):
             dict: The serialized state.
         """
         return {
-            "title": self.title,
+            "name": self.name,
             "content": self.content,
         }
 
@@ -71,6 +76,6 @@ class Sketchpad(Note):
     def tool_write(self) -> dspy.Tool:
         return dspy.Tool(
             self._tool_write,
-            f"{self.title} - Write",
+            f"{self.name} - Write",
             "Sets the content of this Sketchpad.",
         )

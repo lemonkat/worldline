@@ -40,12 +40,12 @@ class Record(Note):
     pointers to other records (related).
 
     Attributes:
-        title (str): A short, descriptive title for the Record.
+        name (str): A short, descriptive name for the Record.
         content (str): The detailed text of the Record.
         source (str, optional): A text description of the epistemological origin of the Record.
         related (list[UID]): A list of UIDs pointing to other associated Records.
     """
-    title: str = "UNTITLED"
+    name: str = "UNTITLED"
     content: str = ""
     source: typing.Optional[str] = None
     related: list[UID] = Field(default_factory=list)
@@ -85,18 +85,18 @@ class Record(Note):
     def _get_content(self) -> str:
         """Formats the Record for the LLM context window.
 
-        Dynamically resolves the titles of any related UIDs from the global 
+        Dynamically resolves the names of any related UIDs from the global 
         registry to provide semantic hints to the LLM.
 
         Returns:
             str: The formatted narrative string representing this memory.
         """
-        lines = [f"[Record] {self.title}:", self.content]
+        lines = [f"[Record] {self.name}:", self.content]
         if self.source: 
             lines.append(f"Source: {self.source}")
         if self.related:
-            related_titles = [f"[UID {uid}] {self.ctx.registry[uid].title}" for uid in self.related]
-            lines.append("Related: " + ", ".join(related_titles))
+            related_names = [f"[UID {uid}] {self.ctx.registry[uid].name}" for uid in self.related]
+            lines.append("Related: " + ", ".join(related_names))
         return "\n".join(lines)
     
     def _pack(self) -> dict:
@@ -106,7 +106,7 @@ class Record(Note):
             dict: The state dictionary.
         """
         return {
-            "title": self.title,
+            "name": self.name,
             "content": self.content,
             "source": self.source,
             "related_UIDs": self.related
@@ -118,7 +118,7 @@ class Record(Note):
         Args:
             state (dict): The dictionary containing the saved state.
         """
-        self.title = state["title"]
+        self.name = state["name"]
         self.content = state["content"]
         self.source = state["source"]
         self.related = state["related_UIDs"]
@@ -135,11 +135,11 @@ class Library(Note):
     into its context during the current turn.
 
     Attributes:
-        title (str): The name of the Library (e.g., "World Knowledge", "Bob's Beliefs").
+        name (str): The name of the Library (e.g., "World Knowledge", "Bob's Beliefs").
         records (dict[UID, Record]): The master database of all contained records.
         loaded (dict[UID, float]): Working memory mapping active UIDs to relevance scores.
     """
-    title: str = "MAIN"
+    name: str = "MAIN"
     records: set[UID] = Field(default_factory=set)
     loaded: dict[UID, float] = Field(default_factory=dict)
 
@@ -150,6 +150,7 @@ class Library(Note):
             dict: The state dictionary.
         """
         return {
+            "name": self.name,
             "record_UIDs": list(self.records),
             "loaded_UIDs": self.loaded,
         }
@@ -160,6 +161,7 @@ class Library(Note):
         Args:
             state (dict): The dictionary containing the saved state.
         """
+        self.name = state["name"]
         self.records = set(state["record_UIDs"])
         self.loaded = state["loaded_UIDs"]
 
@@ -229,7 +231,7 @@ class Library(Note):
 
     def create(
         self,
-        title: str,
+        name: str,
         content: str,
         source: typing.Optional[str] = None,
         related: typing.Optional[list[UID]] = None, 
@@ -237,7 +239,7 @@ class Library(Note):
         """Creates a new Record and stores it in the Library.
 
         Args:
-            title (str): The short title of the Record.
+            name (str): The short name of the Record.
             content (str): The detailed text.
             source (str, optional): Provenance description. Defaults to None.
             related (list[UID], optional): Pointers to associated Records. Defaults to None.
@@ -245,7 +247,7 @@ class Library(Note):
         Returns:
             Record: The newly instantiated Record.
         """
-        record = Record(ctx=self.ctx, title=title, content=content, source=source, related=related or [])
+        record = Record(ctx=self.ctx, name=name, content=content, source=source, related=related or [])
         self.records.add(record.uid)
         self.edited = True
         return record
@@ -253,7 +255,7 @@ class Library(Note):
     def update(
         self, 
         uid: UID, 
-        title: typing.Optional[str] = None, 
+        name: typing.Optional[str] = None, 
         content: typing.Optional[str] = None,
         source: typing.Optional[str] = None,
         related: typing.Optional[list[UID]] = None, 
@@ -263,7 +265,7 @@ class Library(Note):
 
         Args:
             uid (UID): The UID of the Record to modify.
-            title (str, optional): New title. Defaults to None.
+            name (str, optional): New name. Defaults to None.
             content (str, optional): New content text. Defaults to None.
             source (str, optional): New source description. Defaults to None.
             related (list[UID], optional): New associative pointers. Defaults to None.
@@ -278,8 +280,8 @@ class Library(Note):
         """
         self._verify_loaded(uid)
         record = self.ctx.registry[uid]
-        if title is not None:
-            record.title = title
+        if name is not None:
+            record.name = name
         if content is not None:
             record.content = record.content + content if append else content
         if source is not None:
@@ -325,7 +327,7 @@ class Library(Note):
         Returns:
             str: The concatenated narrative string.
         """
-        lines = [f"[Library] {self.title}"]
+        lines = [f"[Library] {self.name}"]
         lines.extend(record.get_content() for record in records)
         return "\n".join(lines)
 
@@ -358,7 +360,7 @@ class Library(Note):
     def tool_recall(self) -> dspy.Tool:
         return dspy.Tool(
             self._tool_recall,
-            f"{self.title} - Recall",
+            f"{self.name} - Recall",
             "Finds a Record given its exact UID.",
             arg_desc={
                 "uid": "The exact UID of the record. Case-sensitive.",
@@ -380,18 +382,18 @@ class Library(Note):
     def tool_search(self) -> dspy.Tool:
         return dspy.Tool(
             self._tool_search,
-            f"{self.title} - Search",
+            f"{self.name} - Search",
             f"Find {self.ctx.config.library_search_k} Records via cosine similarity of embedding vectors. Will not return any Records that are already in the context.",
             arg_desc={
                 "query": "The query to use for the search.",
             }
         )
 
-    def _tool_create(self, title: str, content: str, source: str, related: str) -> str:
+    def _tool_create(self, name: str, content: str, source: str, related: str) -> str:
         """DSPy tool wrapper for creating a new Record in the Library.
         
         Args:
-            title (str): The title of the new Record.
+            name (str): The name of the new Record.
             content (str): The narrative text.
             source (str): A description of the origin of this memory ('N/A' for None).
             related (str): A comma-separated string of related UIDs ('N/A' for None).
@@ -409,29 +411,29 @@ class Library(Note):
                 return f"Error: Referenced UID {uid} but no Record with that UID could be found. It may have been deleted. No changes have been made."
         if len(related_UIDs) > self.ctx.config.library_max_n_refs:
             return f"Error: Too many Records referenced ({len(related_UIDs)} Records). Max is {self.ctx.config.library_max_n_refs} Records."
-        record = self.create(title, content, None if source.upper().strip() == "N/A" else source, related_UIDs)
+        record = self.create(name, content, None if source.upper().strip() == "N/A" else source, related_UIDs)
         return f"Success. Created Record: {self.format_records([record])}"
 
     @property
     def tool_create(self) -> dspy.Tool:
         return dspy.Tool(
             self._tool_create,
-            f"{self.title} - Create",
+            f"{self.name} - Create",
             "Create a new Record.",
             arg_desc={
-                "title": "A title for this Record.",
+                "name": "A name for this Record.",
                 "content": f"The contents of this Record. Recommended {self.ctx.config.library_avg_record_size} sentences, maximum {self.ctx.config.library_max_record_size} sentences.",
                 "source": "A very short description of how this information came to be. Write 'N/A' to leave empty.",
                 "related": f"UIDs of potentially relevant existing Records. Case-sensitive. Separate by commas, like 'XY12, A1B9, 74J8'. Write 'N/A' to leave empty. Recommended {self.ctx.config.library_avg_n_refs} references, max {self.ctx.config.library_max_n_refs} references.",
             }
         )
     
-    def _tool_update(self, uid: UID, title: str, content: str, source: str, related: str, append: bool) -> str:
+    def _tool_update(self, uid: UID, name: str, content: str, source: str, related: str, append: bool) -> str:
         """DSPy tool wrapper for modifying an existing Record in working memory.
         
         Args:
             uid (UID): The UID of the Record to modify.
-            title (str): The new title ('N/A' to skip).
+            name (str): The new name ('N/A' to skip).
             content (str): The new text content ('N/A' to skip).
             source (str): The new origin description ('N/A' to skip).
             related (str): A comma-separated string of new related UIDs ('N/A' to skip).
@@ -465,7 +467,7 @@ class Library(Note):
                 return f"Error: Too many Records referenced ({len(related_UIDs)} Records). Max is {self.ctx.config.library_max_n_refs} Records."
         record = self.update(
             uid, 
-            None if title.upper() == "N/A" else title,
+            None if name.upper() == "N/A" else name,
             None if content.upper() == "N/A" else content,
             None if source.upper() == "N/A" else source,
             related_UIDs,
@@ -477,11 +479,11 @@ class Library(Note):
     def tool_update(self) -> dspy.Tool:
         return dspy.Tool(
             self._tool_update,
-            f"{self.title} - Update",
+            f"{self.name} - Update",
             "Update an existing Record.",
             arg_desc={
                 "uid": "The UID of the Record to edit. Case-sensitive. Must be a Record currently in the context.",
-                "title": "The new title for this Record. Write 'N/A' to not edit. Avoid editing this unless necessary.",
+                "name": "The new name for this Record. Write 'N/A' to not edit. Avoid editing this unless necessary.",
                 "content": f"The contents of this Record. Recommended {self.ctx.config.library_avg_record_size} sentences, maximum {self.ctx.config.library_max_record_size} sentences. Write 'N/A' to not edit.",
                 "source": "A very short description of how this information came to be. Write 'N/A' to not edit. Avoid editing this unless necessary. Will overwrite existing sources.",
                 "related": f"UIDs of potentially relevant existing Records. Case-sensitive. Separate by commas, like 'XY12, A1B9, 74J8'. Write 'N/A' to not edit. Avoid editing this unless necessary. Will overwrite existing references. Recommended {self.ctx.config.library_avg_n_refs} references, max {self.ctx.config.library_max_n_refs} references.",
@@ -510,7 +512,7 @@ class Library(Note):
     def tool_delete(self) -> dspy.Tool:
         return dspy.Tool(
             self._tool_delete,
-            f"{self.title} - Delete",
+            f"{self.name} - Delete",
             "Delete an existing Record.",
             arg_desc={
                 "uid": "The UID of the Record to delete. Case-sensitive. Must be a Record currently in the context.",

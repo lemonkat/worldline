@@ -27,19 +27,19 @@ class Worldline(Note):
     are mathematically guaranteed to cascade down to the deepest open Arc.
 
     Attributes:
-        title (str): The title of the Arc or Beat.
+        name (str): The name of the Arc or Beat.
         content (str, optional): The raw text or summary content. None if the Arc is open.
         children (list[UID]): The ordered list of UIDs of nested Worldlines.
     """
-    title: str = "ROOT"
+    name: str = "ROOT"
     content: typing.Optional[str] = None
     children: list[UID] = Field(default_factory=list)
 
-    def beat(self, title: str, content: str) -> None:
+    def beat(self, name: str, content: str) -> None:
         """Adds a single, atomic Beat node to the deepest open Arc.
         
         Args:
-            title (str): A short description of the action.
+            name (str): A short description of the action.
             content (str): The raw narrative text of the event.
             
         Raises:
@@ -48,16 +48,16 @@ class Worldline(Note):
         if not self.open:
             raise RuntimeError("RuntimeError: Cannot append to a " + ("closed arc" if self.children else "beat") + ".")
         if self.children and not self[-1].content:
-            self[-1].beat(title, content)
+            self[-1].beat(name, content)
         else:
-            self.children.append(Worldline(ctx=self.ctx, title=title, content=content).uid)
+            self.children.append(Worldline(ctx=self.ctx, name=name, content=content).uid)
             self.edited = True
 
-    def dive(self, title: str) -> None:
+    def dive(self, name: str) -> None:
         """Opens a new nested Arc within the deepest open Arc.
         
         Args:
-            title (str): The title of the new Arc.
+            name (str): The name of the new Arc.
             
         Raises:
             RuntimeError: If the Worldline (or the deepest Arc) is already closed.
@@ -72,9 +72,9 @@ class Worldline(Note):
             warnings.warn(f"Diving past maximum depth of {self.ctx.config.worldline_max_depth}.", RuntimeWarning)
         
         if self.children and not self[-1].content:
-            self[-1].dive(title)
+            self[-1].dive(name)
         else:
-            self.children.append(Worldline(ctx=self.ctx, title=title).uid)
+            self.children.append(Worldline(ctx=self.ctx, name=name).uid)
             self.edited = True
 
     def surface(self, content: str) -> None:
@@ -157,7 +157,7 @@ class Worldline(Note):
         """
         # open arc
         if not self.content:
-            out = [f"[Worldline] {self.title} (current depth {self.depth}):"]
+            out = [f"[Worldline] {self.name} (current depth {self.depth}):"]
             for uid in self.children if verbosity > 0 else self.children[-self.ctx.config.worldline_recall_k:]:
                 child = self[uid]
                 for line in child._get_content(2 if verbosity == 2 else 0).splitlines():
@@ -167,7 +167,7 @@ class Worldline(Note):
                 out.append("\n>>>")
             return "".join(out)
         # beat or closed arc
-        return f"{self.title}: {self.content}"
+        return f"{self.name}: {self.content}"
 
     def _unpack(self, state: dict) -> None:
         """Applies a packed state dictionary to internal variables.
@@ -177,7 +177,7 @@ class Worldline(Note):
         Args:
             state (dict): The packed dictionary representation.
         """
-        self.title = state["title"]
+        self.name = state["name"]
         self.content = state["content"]
         self.children = state["child_UIDs"]
 
@@ -191,7 +191,7 @@ class Worldline(Note):
             dict: The serialized state.
         """
         return {
-            "title": self.title,
+            "name": self.name,
             "content": self.content,
             "child_UIDs": self.children,
         }
@@ -201,11 +201,11 @@ class Worldline(Note):
             return self[self.children[idx]]
         return self.ctx.registry[idx]
 
-    def _tool_beat(self, title: str, content: str) -> str:
+    def _tool_beat(self, name: str, content: str) -> str:
         """DSPy tool wrapper for appending a beat to the Worldline.
         
         Args:
-            title (str): A short title for the beat.
+            name (str): A short name for the beat.
             content (str): The narrative content of the event.
             
         Returns:
@@ -216,26 +216,26 @@ class Worldline(Note):
         n_sentences = count_sentences(content)
         if n_sentences > self.ctx.config.worldline_max_entry_size:
             return f"Error: Content is too long ({n_sentences} sentences). Max length is {self.ctx.config.worldline_max_entry_size} sentences. No changes have been made."
-        self.beat(title, content)
+        self.beat(name, content)
         return f"Success: Step appended. Worldline state: {self.get_content()}"
 
     @property
     def tool_beat(self) -> dspy.Tool:
         return dspy.Tool(
             self._tool_beat,
-            f"{self.title} - Beat",
+            f"{self.name} - Beat",
             "Adds a beat (leaf) entry to this Worldline. Use this for recording individual events or thoughts.",
             arg_desc={
-                "title": "A short title for this beat.",
+                "name": "A short name for this beat.",
                 "content": f"Content for this beat. Recommended {self.ctx.config.worldline_avg_entry_size} sentences, maximum {self.ctx.config.worldline_max_entry_size} sentences.",
             }
         )
 
-    def _tool_dive(self, title: str) -> str:
+    def _tool_dive(self, name: str) -> str:
         """DSPy tool wrapper for opening a new sub-arc.
         
         Args:
-            title (str): The title of the new Arc.
+            name (str): The name of the new Arc.
             
         Returns:
             str: A success message with the new Worldline state, or an error string.
@@ -244,7 +244,7 @@ class Worldline(Note):
             return "Error: Arc closed. No changes have been made."
         if self.depth == self.ctx.config.worldline_max_depth:
             return f"Error: Worldline already at max depth of {self.depth}. No changes have been made."
-        self.dive(title)
+        self.dive(name)
         return f"Success: Arc diving to level {self.depth} appended. Worldline state: {self.get_content()}"
 
 
@@ -252,10 +252,10 @@ class Worldline(Note):
     def tool_dive(self) -> dspy.Tool:
         return dspy.Tool(
             self._tool_dive,
-            f"{self.title} - Dive",
+            f"{self.name} - Dive",
             "Adds an Arc entry to this Worldline, diving to the next level of detail.",
             arg_desc={
-                "title": "A short title for this Arc, succinctly describing what it entails.",
+                "name": "A short name for this Arc, succinctly describing what it entails.",
             }
         )
 
@@ -282,7 +282,7 @@ class Worldline(Note):
     def tool_surface(self) -> dspy.Tool:
         return dspy.Tool(
             self._tool_surface,
-            f"{self.title} - Surface",
+            f"{self.name} - Surface",
             "Completes the current sub-arc, adding a summary, and surfacing to the previous depth level.",
             arg_desc={
                 "summary": f"A summary of the current arc. Make sure to capture all relevant details. Recommended {self.ctx.config.worldline_avg_entry_size} sentences, maximum {self.ctx.config.worldline_max_entry_size} sentences.",

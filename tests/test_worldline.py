@@ -13,8 +13,8 @@ def mock_ctx():
     )
 
 def test_worldline_initialization(mock_ctx):
-    root = Worldline(ctx=mock_ctx, title="ROOT")
-    assert root.title == "ROOT"
+    root = Worldline(ctx=mock_ctx, name="ROOT")
+    assert root.name == "ROOT"
     assert root.open is True
     assert root.depth == 1
     assert root.can_dive is True
@@ -23,7 +23,7 @@ def test_worldline_initialization(mock_ctx):
     assert root.edited is True
 
 def test_worldline_beat(mock_ctx):
-    root = Worldline(ctx=mock_ctx, title="ROOT")
+    root = Worldline(ctx=mock_ctx, name="ROOT")
     root.edited = False # Reset for testing mutation
     
     root.beat("Action 1", "Did something.")
@@ -31,7 +31,7 @@ def test_worldline_beat(mock_ctx):
     assert len(root.children) == 1
     child = root[0]
     
-    assert child.title == "Action 1"
+    assert child.name == "Action 1"
     assert child.content == "Did something."
     assert child.open is False
     assert root.open is True # Root remains open
@@ -41,14 +41,14 @@ def test_worldline_beat(mock_ctx):
     assert root.edited is True # Root appended a child, so it was edited
 
 def test_worldline_dive_and_surface(mock_ctx):
-    root = Worldline(ctx=mock_ctx, title="ROOT")
+    root = Worldline(ctx=mock_ctx, name="ROOT")
     root.edited = False
     
     root.dive("Arc 1")
     assert len(root.children) == 1
     arc = root[0]
     
-    assert arc.title == "Arc 1"
+    assert arc.name == "Arc 1"
     assert arc.open is True
     assert root.depth == 2
     assert root.latest is arc
@@ -68,7 +68,7 @@ def test_worldline_dive_and_surface(mock_ctx):
     assert arc.edited is True
 
 def test_worldline_routing(mock_ctx):
-    root = Worldline(ctx=mock_ctx, title="ROOT")
+    root = Worldline(ctx=mock_ctx, name="ROOT")
     
     root.dive("Arc 1")
     arc1 = root[0]
@@ -100,7 +100,7 @@ def test_worldline_routing(mock_ctx):
     assert arc2.edited is True
 
 def test_worldline_errors(mock_ctx):
-    root = Worldline(ctx=mock_ctx, title="ROOT")
+    root = Worldline(ctx=mock_ctx, name="ROOT")
     root.surface("Close ROOT")
     
     assert root.open is False
@@ -115,7 +115,7 @@ def test_worldline_errors(mock_ctx):
         root.surface("Already closed")
 
 def test_worldline_max_depth_warning(mock_ctx):
-    root = Worldline(ctx=mock_ctx, title="ROOT")
+    root = Worldline(ctx=mock_ctx, name="ROOT")
     
     root.dive("Depth 2")
     root.dive("Depth 3")
@@ -129,7 +129,7 @@ def test_worldline_max_depth_warning(mock_ctx):
     assert root.depth == 4
 
 def test_worldline_pack_unpack(mock_ctx):
-    root = Worldline(ctx=mock_ctx, title="ROOT")
+    root = Worldline(ctx=mock_ctx, name="ROOT")
     root.dive("Arc 1")
     root.beat("Beat 1", "Action.")
     
@@ -137,7 +137,7 @@ def test_worldline_pack_unpack(mock_ctx):
     beat = arc[0]
     
     packed_root = root.pack()
-    assert packed_root["title"] == "ROOT"
+    assert packed_root["name"] == "ROOT"
     assert packed_root["child_UIDs"] == [arc.uid]
     
     packed_arc = arc.pack()
@@ -145,15 +145,15 @@ def test_worldline_pack_unpack(mock_ctx):
     
     # Test unpacking
     # Create a fresh root with no children
-    new_root = Worldline(ctx=mock_ctx, title="New Root")
+    new_root = Worldline(ctx=mock_ctx, name="New Root")
     new_root.unpack(packed_root)
     
-    assert new_root.title == "ROOT"
+    assert new_root.name == "ROOT"
     assert len(new_root.children) == 1
     assert new_root.children[0] == arc.uid
 
 def test_worldline_get_content(mock_ctx):
-    root = Worldline(ctx=mock_ctx, title="ROOT")
+    root = Worldline(ctx=mock_ctx, name="ROOT")
     root.dive("Arc 1")
     root.beat("Beat 1", "Action 1.")
     root.beat("Beat 2", "Action 2.")
@@ -171,7 +171,7 @@ def test_worldline_get_content(mock_ctx):
     assert ">>>" in content
 
 def test_worldline_tools(mock_ctx):
-    root = Worldline(ctx=mock_ctx, title="ROOT")
+    root = Worldline(ctx=mock_ctx, name="ROOT")
     
     # Test tool_beat
     res = root._tool_beat("Test Beat", "Some content.")

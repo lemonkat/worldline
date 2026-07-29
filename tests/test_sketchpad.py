@@ -13,10 +13,9 @@ def mock_ctx():
 
 def test_sketchpad_basic(mock_ctx):
     # Test initialization
-    sp = Sketchpad(ctx=mock_ctx, title="Plan")
-    assert sp.title == "Plan"
+    sp = Sketchpad(ctx=mock_ctx, name="Plan")
+    assert sp.name == "Plan"
     assert sp.content == ""
-    assert sp.open == True if hasattr(sp, "open") else True  # Note: Sketchpad doesn't have .open
     
     # Test _get_content
     content = sp.get_content(include_uid=False)
@@ -38,14 +37,14 @@ def test_sketchpad_basic(mock_ctx):
     assert tools[0] == tool
 
 def test_sketchpad_packing(mock_ctx):
-    sp = Sketchpad(ctx=mock_ctx, title="Notes", content="Hello World")
+    sp = Sketchpad(ctx=mock_ctx, name="Notes", content="Hello World")
     state = sp.pack()
     
-    assert state["title"] == "Notes"
+    assert state["name"] == "Notes"
     assert state["content"] == "Hello World"
     
     # Test unpack
     sp2 = Sketchpad(ctx=mock_ctx)
     sp2.unpack(state)
-    assert sp2.title == "Notes"
+    assert sp2.name == "Notes"
     assert sp2.content == "Hello World"

@@ -15,17 +15,17 @@ def mock_ctx():
     )
 
 def test_library_create_update_delete(mock_ctx):
-    library = Library(ctx=mock_ctx, title="Test Lib")
+    library = Library(ctx=mock_ctx, name="Test Lib")
     
     # Test Create
     record = library.create(
-        title="Apples",
+        name="Apples",
         content="Apples are red.",
         source="Farmer",
         related=[]
     )
     assert record.uid in library.records
-    assert mock_ctx.registry[record.uid].title == "Apples"
+    assert mock_ctx.registry[record.uid].name == "Apples"
     assert library.edited is True
     
     # Test Update (Unloaded should fail)
@@ -58,8 +58,8 @@ def test_library_create_update_delete(mock_ctx):
 
 def test_library_initialize_and_recall(mock_ctx):
     library = Library(ctx=mock_ctx)
-    r1 = library.create(title="R1", content="...")
-    r2 = library.create(title="R2", content="...")
+    r1 = library.create(name="R1", content="...")
+    r2 = library.create(name="R2", content="...")
     
     # Recall sets the score to 1e6
     library.recall(r1.uid)
@@ -84,8 +84,8 @@ def test_library_search(mock_ctx):
         library = Library(ctx=mock_ctx)
         mock_ctx.config.library_search_k = 1 
 
-        r_magic = library.create(title="Sword", content="magic sword")
-        r_normal = library.create(title="Rock", content="normal rock")
+        r_magic = library.create(name="Sword", content="magic sword")
+        r_normal = library.create(name="Rock", content="normal rock")
         
         # Explicitly set embeddings to avoid Note property lazy-evaluation calling original get_emb
         r_magic._emb = np.array([1.0, 0.0])
@@ -108,19 +108,19 @@ def test_library_search(mock_ctx):
         assert results2[0].uid == r_normal.uid
 
 def test_library_time_travel(mock_ctx):
-    library = Library(ctx=mock_ctx, title="Time Lib")
+    library = Library(ctx=mock_ctx, name="Time Lib")
     
     # PAGE 0: Initial State
-    record = library.create(title="Origin", content="Start")
+    record = library.create(name="Origin", content="Start")
     library.recall(record.uid)
     mock_ctx.record()
     
     # PAGE 1: First Edit
     mock_ctx.page_counter.step()
-    library.update(uid=record.uid, title="Future", content=" Next", append=True)
+    library.update(uid=record.uid, name="Future", content=" Next", append=True)
     mock_ctx.record()
     
-    assert mock_ctx.registry[record.uid].title == "Future"
+    assert mock_ctx.registry[record.uid].name == "Future"
     assert mock_ctx.registry[record.uid].content == "Start Next"
     # Registry has Library, Record. Page 0 writes both (since edited=True upon creation/recall). Page 1 writes both.
     assert len(mock_ctx.history) == 4 
@@ -137,14 +137,14 @@ def test_library_time_travel(mock_ctx):
     mock_ctx.rewind()
     
     assert record.uid in library.records # Un-deleted!
-    assert mock_ctx.registry[record.uid].title == "Future"
+    assert mock_ctx.registry[record.uid].name == "Future"
     assert mock_ctx.registry[record.uid].content == "Start Next"
     
     # TIME TRAVEL: REWIND TO PAGE 0
     mock_ctx.page_counter.page = 0
     mock_ctx.rewind()
     
-    assert mock_ctx.registry[record.uid].title == "Origin"
+    assert mock_ctx.registry[record.uid].name == "Origin"
     assert mock_ctx.registry[record.uid].content == "Start"
 
 def test_record_lazy_evaluation(mock_ctx):
@@ -152,7 +152,7 @@ def test_record_lazy_evaluation(mock_ctx):
         mock_emb.return_value = np.array([0.1, 0.2])
         mock_imp.return_value = 0.95
         
-        record = Record(ctx=mock_ctx, title="Title", content="Hello world")
+        record = Record(ctx=mock_ctx, name="Title", content="Hello world")
         
         # API should NOT have been called on init!
         mock_emb.assert_not_called()
@@ -172,30 +172,30 @@ def test_record_lazy_evaluation(mock_ctx):
 
 def test_record_unpack_resets_lazy_cache(mock_ctx):
     with patch("worldline.llm.get_emb") as mock_emb, patch("worldline.llm.get_importance"):
-        record = Record(ctx=mock_ctx, title="State 1", content="")
+        record = Record(ctx=mock_ctx, name="State 1", content="")
         
         # Trigger cache
         _ = record.emb
         assert mock_emb.call_count == 1
         
         # Unpack changes state and resets cache
-        record.unpack({"title": "State 2", "content": "", "source": None, "related_UIDs": []})
-        assert record.title == "State 2"
+        record.unpack({"name": "State 2", "content": "", "source": None, "related_UIDs": []})
+        assert record.name == "State 2"
         
         # Cache should be cleared, next access triggers API again
         _ = record.emb
         assert mock_emb.call_count == 2
 
 def test_record_equality_numpy_fix(mock_ctx):
-    record1 = Record(ctx=mock_ctx, title="A")
+    record1 = Record(ctx=mock_ctx, name="A")
     record1.uid = "ID-1"
     record1._emb = np.array([1, 2, 3])
     
-    record2 = Record(ctx=mock_ctx, title="B")
+    record2 = Record(ctx=mock_ctx, name="B")
     record2.uid = "ID-1"
     record2._emb = np.array([4, 5, 6])
     
-    record3 = Record(ctx=mock_ctx, title="C")
+    record3 = Record(ctx=mock_ctx, name="C")
     record3.uid = "ID-2"
     
     # This would crash with a ValueError without eq=False and the custom __eq__
@@ -204,7 +204,7 @@ def test_record_equality_numpy_fix(mock_ctx):
     assert record1 != "not a record"
 
 def test_library_tools(mock_ctx):
-    lib = Library(ctx=mock_ctx, title="Test Lib")
+    lib = Library(ctx=mock_ctx, name="Test Lib")
     
     # Test tool_create
     res_create = lib._tool_create("Record 1", "Content 1.", "N/A", "N/A")
@@ -260,7 +260,7 @@ def test_library_initialize_search(mock_ctx):
         mock_emb.return_value = np.array([1.0, 0.0])
         mock_imp.return_value = 0.5
         
-        lib = Library(ctx=mock_ctx, title="Init Lib")
+        lib = Library(ctx=mock_ctx, name="Init Lib")
         r1 = lib.create("Apples", "Red apples")
         r1._emb = np.array([1.0, 0.0])
         r1._importance = 0.5

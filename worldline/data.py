@@ -10,6 +10,7 @@ for LLM-derived attributes to avoid circular dependencies.
 
 from dataclasses import dataclass, field
 import typing
+import threading
 
 from pydantic import BaseModel, model_validator, ConfigDict
 import dspy
@@ -39,6 +40,7 @@ class PageCounter:
             start (Page, optional): The initial page number. Defaults to 0.
         """
         self.page = start
+        self.lock = threading.RLock()
 
     def step(self) -> Page:
         """
@@ -47,8 +49,9 @@ class PageCounter:
         Returns:
             Page: The new current page number.
         """
-        self.page += 1
-        return self.page
+        with self.lock:
+            self.page += 1
+            return self.page
     
     def __str__(self) -> str:
         return f"Page {self.page}"
@@ -122,6 +125,7 @@ class Context:
     config: Config
     registry: dict[UID, "Note"] = field(default_factory=dict)
     history: list[Update] = field(default_factory=list)
+    lock: threading.RLock = field(default_factory=threading.RLock)
 
     def record(self) -> None:
         """Commits all current edits to the history log.
@@ -130,14 +134,15 @@ class Context:
         them to the history log. If the current page is strictly less than the 
         latest history entry, the future timeline is erased.
         """
-        cur_page = self.page_counter.page
-        while self.history and self.history[-1].page > cur_page:
-            self.history.pop()
+        with self.lock:
+            cur_page = self.page_counter.page
+            while self.history and self.history[-1].page > cur_page:
+                self.history.pop()
 
-        for entity in self.registry.values():
-            if entity.edited:
-                entity.edited = False
-                self.history.append(self.Update(cur_page, entity.uid, entity.pack()))
+            for entity in self.registry.values():
+                if entity.edited:
+                    entity.edited = False
+                    self.history.append(self.Update(cur_page, entity.uid, entity.pack()))
         
 
     def rewind(self) -> None:
@@ -147,15 +152,16 @@ class Context:
         to or equal to the current page. Entities created after the current 
         page are safely ignored.
         """
-        cur_page = self.page_counter.page
-        updated = set()
-        for page, uid, state in reversed(self.history):
-            if page > cur_page or uid in updated:
-                continue
-            updated.add(uid)
-            self.registry[uid].unpack(state)
-            if len(updated) == len(self.registry):
-                break
+        with self.lock:
+            cur_page = self.page_counter.page
+            updated = set()
+            for page, uid, state in reversed(self.history):
+                if page > cur_page or uid in updated:
+                    continue
+                updated.add(uid)
+                self.registry[uid].unpack(state)
+                if len(updated) == len(self.registry):
+                    break
 
 class Note(BaseModel):
     """Base class for all saveable objects in the Worldline system.
@@ -172,6 +178,10 @@ class Note(BaseModel):
     ctx: Context
     uid: typing.Optional[UID] = None
     edited: bool = True
+    lock: threading.RLock = field(default_factory=threading.RLock)
+
+    sys_name: typing.ClassVar[str] = "Note"
+    sys_desc: typing.ClassVar[str] = "Base generic note."
 
     @model_validator(mode="after")
     def _setup(self) -> "Note":

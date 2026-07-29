@@ -121,3 +121,23 @@ def test_note_get_content(mock_ctx):
     note = MockNote(ctx=mock_ctx, text="Test content")
     assert note.get_content(include_uid=False) == "Test content"
     assert note.get_content(include_uid=True) == f"[UID {note.uid}] Test content"
+
+def test_context_concurrency(mock_ctx):
+    import threading
+
+    def worker():
+        for _ in range(100):
+            mock_ctx.page_counter.step()
+            note = MockNote(ctx=mock_ctx, text="Concurrency test")
+            note.edited = True
+            mock_ctx.record()
+
+    threads = [threading.Thread(target=worker) for _ in range(10)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    # 10 threads doing 100 steps each = 1000 history entries
+    assert len(mock_ctx.history) == 1000
+    assert mock_ctx.page_counter.page == 1000
