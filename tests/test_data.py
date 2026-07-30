@@ -142,3 +142,16 @@ def test_context_concurrency(mock_ctx):
     # 10 threads doing 100 steps each = 1000 history entries
     assert len(mock_ctx.history) == 1000
     assert mock_ctx.page_counter.page == 1000
+
+def test_note_from_packed(mock_ctx):
+    # Setup state to restore from
+    uid = mock_ctx.uid_generator.next()
+    state = {"text": "Restored State"}
+    
+    # Restore from packed state
+    note = MockNote.from_packed(ctx=mock_ctx, uid=uid, state=state)
+    
+    assert note.uid == uid
+    assert note.text == "Restored State"
+    assert note.edited is False
+    assert mock_ctx.registry[uid] is note

@@ -12,6 +12,7 @@ from dataclasses import dataclass, field
 import typing
 import threading
 import copy
+import contextlib
 
 from pydantic import BaseModel, model_validator, ConfigDict
 import dspy
@@ -312,4 +313,39 @@ class Note(BaseModel):
         """
         return
 
+    @classmethod
+    def from_packed(cls, ctx: Context, uid: UID, state: dict) -> typing.Self:
+        """Instantiates a Note directly from a packed state state.
+        
+        Args:
+            ctx (Context): The context object to load the Note into.
+            uid (UID): The UID of the Note.
+            state: the state dictionary of the saved Note.
             
+        Returns:
+            typing.Self: the loaded Note or Note subclass.
+        """
+        note = cls(ctx=ctx, uid=uid) 
+        with note.lock:
+            note._unpack(state)
+            note.edited = False 
+            return note
+
+            
+@contextlib.contextmanager
+def lock_notes(notes: typing.Iterable[Note]) -> typing.Any:
+    """Context manager that safely acquires locks for multiple Notes in UID order to prevent deadlocks.
+    
+    Args:
+        notes (Iterable[Note]): Notes to acquire locks of."""
+    
+    # 1. Sort by UID to guarantee deterministic lock order
+    sorted_notes = sorted(notes, key=lambda n: n.uid if n.uid else "")
+    
+    # 2. Use ExitStack to dynamically enter all locks
+    with contextlib.ExitStack() as stack:
+        for note in sorted_notes:
+            stack.enter_context(note.lock)
+        
+        # 3. Yield control back to the caller
+        yield

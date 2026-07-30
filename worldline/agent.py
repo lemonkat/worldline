@@ -1,10 +1,14 @@
 import random
 import typing
-import contextlib
-
 import dspy
 
-from worldline.data import Context, Note
+from pydantic import model_validator
+
+from worldline.uid import UID
+from worldline.data import Context, Note, lock_notes
+from worldline.worldline import Worldline
+from worldline.library import Library
+from worldline.sketchpad import Sketchpad
 
 def _tool_d20(action: str, threshold: int, outcome_low: str, outcome_high: str) -> str:
     if threshold <= 0 or threshold > 20:
@@ -61,7 +65,6 @@ class WorldlineAgent(dspy.Module):
         # the notes for which we have tool access, sorted by UID
         tool_names = {tool.name for tool in self.tools}
         self.mutable_notes = [note for note in self.notes if any(tool.name in tool_names for tool in note.tools)]
-        self.mutable_notes.sort(key=lambda note: note.uid)
 
         self.signature = signature.prepend(
             "context", 
@@ -101,7 +104,7 @@ class WorldlineAgent(dspy.Module):
         """
         context = ""
         for note in self.notes:
-            context += "\n\n" + note.initialize(context)
+            context += ("\n\n" if context else "") + note.initialize(context)
         return context
 
     def forward(self, **kwargs: typing.Any) -> typing.Any:
@@ -110,9 +113,7 @@ class WorldlineAgent(dspy.Module):
         Acquires locks on all mutable Notes (in UID order to prevent deadlocks) 
         before executing the LLM loop to ensure thread-safe read/write operations.
         """
-        with contextlib.ExitStack() as stack:
-            for note in self.mutable_notes:
-                stack.enter_context(note.lock)
+        with lock_notes(self.mutable_notes):
             return self.react(context=self._build_context(), **kwargs)
 
     async def aforward(self, **kwargs: typing.Any) -> typing.Any:
@@ -122,12 +123,87 @@ class WorldlineAgent(dspy.Module):
         (or uses native aforward if available) to prevent blocking the asyncio 
         event loop, while maintaining perfect thread safety via ordered locks.
         """
-        with contextlib.ExitStack() as stack:
-            for note in self.mutable_notes:
-                stack.enter_context(note.lock)
-            
+        with lock_notes(self.mutable_notes):
             if hasattr(self.react, "aforward"):
                 return await self.react.aforward(context=self._build_context(), **kwargs)
             else:
                 import asyncio
                 return await asyncio.to_thread(self.react, context=self._build_context(), **kwargs)
+
+
+class Actor(Note):
+    """Base class for any autonomous entity with agency in the narrative.
+
+    An Actor is a composite Note that maintains its own personal timeline (Worldline), 
+    knowledge base (Library), and working memory (Sketchpad). It automatically 
+    manages the lifecycle, locking, and save/load (pack/unpack) serialization 
+    of its sub-Notes.
+
+    Attributes:
+        name (str): The name of the Actor.
+        timeline_uid (UID, optional): Pointer to the Actor's Worldline (recent events).
+        memory_uid (UID, optional): Pointer to the Actor's Library (world knowledge/beliefs).
+        moment_uid (UID, optional): Pointer to the Actor's Sketchpad (current thoughts).
+    """
+    name: str = "Unnamed Actor"
+    timeline_uid: typing.Optional[UID] = None
+    memory_uid: typing.Optional[UID] = None
+    moment_uid: typing.Optional[UID] = None
+
+    sys_name: typing.ClassVar[str] = "Actor"
+    sys_desc: typing.ClassVar[str] = "Base class. Not meant to be used directly. IF YOU SEE THIS SOMETHING HAS GONE WRONG."
+
+    @model_validator(mode="after")
+    def _setup_actor(self) -> "Actor":
+        """Post-initialization validation hook for Actor sub-Notes."""
+        if self.timeline_uid is None:
+            self.timeline_uid = Worldline(ctx=self.ctx, name=f"{self.name} - Timeline").uid
+
+        if self.memory_uid is None:
+            self.memory_uid = Library(ctx=self.ctx, name=f"{self.name} - Memory").uid
+
+        if self.moment_uid is None:
+            self.moment_uid = Sketchpad(ctx=self.ctx, name=f"{self.name} - Moment").uid
+                    
+        return self
+
+    def _pack(self) -> dict:
+        """Packages the Actor's sub-Note UIDs into a state snapshot for saving."""
+        return {
+            "data_UIDs": [self.timeline_uid, self.memory_uid, self.moment_uid],
+        }
+
+    def _unpack(self, state: dict) -> None:
+        """Restores the Actor's sub-Note UIDs from a state snapshot."""
+        self.timeline_uid, self.memory_uid, self.moment_uid = state["data_UIDs"]
+
+    @property
+    def timeline(self) -> typing.Optional[Worldline]:
+        """Returns the Actor's Worldline instance (recent subjective events)."""
+        return typing.cast(Worldline, self.ctx.registry[self.timeline_uid]) if self.timeline_uid else None
+
+    @property
+    def memory(self) -> typing.Optional[Library]:
+        """Returns the Actor's Library instance (long-term knowledge and beliefs)."""
+        return typing.cast(Library, self.ctx.registry[self.memory_uid]) if self.memory_uid else None
+
+    @property
+    def moment(self) -> typing.Optional[Sketchpad]:
+        """Returns the Actor's Sketchpad instance (internal monologue and current plans)."""
+        return typing.cast(Sketchpad, self.ctx.registry[self.moment_uid]) if self.moment_uid else None
+
+    @property
+    def tools(self) -> list[dspy.Tool]:
+        tools = [tool_d20]
+        tools.extend(self.timeline.tools)
+        tools.extend(self.memory.tools)
+        tools.extend(self.moment.tools)
+        return tools
+
+    # for when you dont want to edit timeline or moment, for long term only things
+    @property
+    def lookup_tools(self) -> list[dspy.Tool]:
+        tools = [tool_d20]
+        tools.extend(self.memory.tools)
+        return tools
+        
