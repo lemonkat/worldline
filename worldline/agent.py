@@ -1,7 +1,8 @@
 import random
 import typing
-import dspy
 
+import dspy
+from dspy.utils import BaseCallback
 from pydantic import model_validator
 
 from worldline.uid import UID
@@ -11,6 +12,7 @@ from worldline.library import Library
 from worldline.sketchpad import Sketchpad
 
 def _tool_d20(action: str, threshold: int, outcome_low: str, outcome_high: str) -> str:
+    """DSPy tool wrapper for rolling a 20-sided die to determine probabilistic outcomes."""
     if threshold <= 0 or threshold > 20:
         return f"Error: threshold ({threshold}) out of bounds."
     roll = random.randint(1, 20)
@@ -46,6 +48,7 @@ class WorldlineAgent(dspy.Module):
         tools (list[dspy.Tool], optional): Additional tools to expose.
         signature (dspy.Signature): The compiled ReAct signature.
         mutable_notes (list[Note]): The subset of Notes that expose tools.
+        callbacks (list[BaseCallback], optional): Callbacks to pass to dspy.Module.__init__()
     """
     def __init__(
         self, 
@@ -55,8 +58,9 @@ class WorldlineAgent(dspy.Module):
         tools: typing.Optional[list[dspy.Tool]] = None,
         max_iters: int = 30,
         use_react_v2: bool = False,
+        callbacks: typing.Optional[list[BaseCallback]] = None,
     ) -> None:
-        super().__init__()
+        super().__init__(callbacks)
         self.ctx = ctx
 
         self.notes = notes
@@ -154,16 +158,17 @@ class Actor(Note):
     sys_desc: typing.ClassVar[str] = "Base class. Not meant to be used directly. IF YOU SEE THIS SOMETHING HAS GONE WRONG."
 
     @model_validator(mode="after")
-    def _setup_actor(self) -> "Actor":
+    def _setup_actor(self) -> typing.Self:
         """Post-initialization validation hook for Actor sub-Notes."""
-        if self.timeline_uid is None:
-            self.timeline_uid = Worldline(ctx=self.ctx, name=f"{self.name} - Timeline").uid
+        if not self.ctx.is_loading:
+            if self.timeline_uid is None:
+                self.timeline_uid = Worldline(ctx=self.ctx, name=f"{self.name} - Timeline").uid
 
-        if self.memory_uid is None:
-            self.memory_uid = Library(ctx=self.ctx, name=f"{self.name} - Memory").uid
+            if self.memory_uid is None:
+                self.memory_uid = Library(ctx=self.ctx, name=f"{self.name} - Memory").uid
 
-        if self.moment_uid is None:
-            self.moment_uid = Sketchpad(ctx=self.ctx, name=f"{self.name} - Moment").uid
+            if self.moment_uid is None:
+                self.moment_uid = Sketchpad(ctx=self.ctx, name=f"{self.name} - Moment").uid
                     
         return self
 
@@ -203,7 +208,5 @@ class Actor(Note):
     # for when you dont want to edit timeline or moment, for long term only things
     @property
     def lookup_tools(self) -> list[dspy.Tool]:
-        tools = [tool_d20]
-        tools.extend(self.memory.tools)
-        return tools
+        return self.memory.tools
         

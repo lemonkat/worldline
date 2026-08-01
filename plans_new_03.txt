@@ -1,0 +1,58 @@
+NOTE: This is MY planning document, DO NOT TOUCH THIS UNLESS YOU ARE ME
+
+so i figured i should start thinking more about Project Worldline's UI, what it should do
+need following features:
+1. save/load game
+2. configuration (view+edit)
+3. engine state (view+edit)
+4. story (external view)
+5. RPG (user decides what a character does)
+
+engine config should include instructions on the story, themes and stuff, it should separately contain instructions on how to describe the events that occur in the external view
+personas should include instructions on how to describe stuff to them, PlayerPersona should have this be a property which references a player config (independent of engine config)
+if possible, RPG interface should run in a separate process and be able to do multiplayer and stuff
+
+so here's my rough UI layout:
+
+screen A: start
+upper middle, big: PROJECT WORLDLINE in custom big text
+subtitle maybe
+options below: new story, load saved story, connect online, about, credits, quit
+new story complicated - how to initialize world? TBD
+load saved story brings up a menu w/ list of saves, options to load/copy/delete
+no idea how connect online will work but maybe theres some kind of code or URL to share or smth?
+about, credits open small popups
+
+screen B: engine
+at top, tabs for config/state/story, save/load buttons
+at bottom, generic info (current page number and stuff) + undo/redo/retry
+
+tabs:
+config: simple menu w/ text fields, scrolling if necessary
+state: two panes
+left is select a note object to edit - either all top level notes, or a selected note (+ back button)
+if a note is selected, display major subnotes to select further (for Actors) and also string representation
+right pane is blank until a note w/ tools is selected, then options to run tools
+story:
+big scrollable text w/ story so far, maybe option for user to manually write a passage? FE will need to deal with it and adjust
+
+screen C: RPG
+at top, tabs for config/game, connection management buttons
+most of screen is scrollable text containing story described
+just above bottom, buttons for do/say/wait, row of 10 buttons for initiative
+at bottom, generic info
+
+screen D: split
+just screen B and screen C side by side, have to decide when to do this
+maybe it's better if screen B sometimes has an extra tab which is all of screen C instead?
+
+a few other things:
+for non agent based personas (cheap basic LLM persona and player), sketchpad stores the entire state for simplicity
+i have no idea how to multiplayer at all, never done it before, so we'll have to figure that all out, but i think smth like:
+1. persona on server side gets action/initiative request from engine, sends it to client
+2. client sends back both the request and response
+3. if the response comes too late, server tells client that and client tells user "whoops too late" and updates
+4. otherwise server processes response
+so for the most part everything stays server side for simplicity
+
+we may want the engine UI to run on a separate process from the engine itself as well so the system doesn't freeze while making API calls, not sure how to do that bc the engine UI is much more complicated than the RPG UI

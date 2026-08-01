@@ -278,7 +278,7 @@ class Worldline(Note):
             str: A success message with the new Worldline state, or an error string.
         """
         if not self.open:
-            return "Error: Arc closed. No changes have been made."
+            return "Error: Arc already closed. No changes have been made."
         if self.depth == 0:
             return "Error: Cannot surface from depth 0. No changes have been made."
         n_sentences = count_sentences(summary)
@@ -292,7 +292,7 @@ class Worldline(Note):
         return dspy.Tool(
             self._tool_surface,
             f"{self.name} - Surface",
-            "Completes the current sub-arc, adding a summary, and surfacing to the previous depth level.",
+            "Completes the current sub-arc, adding a summary, and surfacing to the previous depth level. Closed Arcs show only their summary and their contents will be inaccessible.",
             arg_desc={
                 "summary": f"A summary of the current arc. Make sure to capture all relevant details. Recommended {self.ctx.config.worldline_avg_entry_size} sentences, maximum {self.ctx.config.worldline_max_entry_size} sentences.",
             }

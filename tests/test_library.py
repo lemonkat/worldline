@@ -1,6 +1,6 @@
 import pytest
 import numpy as np
-from unittest.mock import patch
+from unittest.mock import patch, MagicMock
 
 from worldline.data import Context, PageCounter, Config
 from worldline.uid import UIDGenerator
@@ -76,10 +76,9 @@ def test_library_initialize_and_recall(mock_ctx):
         library.recall("FAKE-UID")
 
 def test_library_search(mock_ctx):
-    with patch("worldline.library.get_emb") as mock_emb, patch("worldline.llm.get_importance") as mock_imp:
+    with patch("worldline.library.get_emb") as mock_emb:
         # Mock embeddings to be predictable
         mock_emb.side_effect = lambda text: np.array([1.0, 0.0]) if "magic" in text else np.array([0.0, 1.0])
-        mock_imp.return_value = 0.5
         
         library = Library(ctx=mock_ctx)
         mock_ctx.config.library_search_k = 1 
@@ -90,8 +89,8 @@ def test_library_search(mock_ctx):
         # Explicitly set embeddings to avoid Note property lazy-evaluation calling original get_emb
         r_magic._emb = np.array([1.0, 0.0])
         r_normal._emb = np.array([0.0, 1.0])
-        r_magic._importance = 0.5
-        r_normal._importance = 0.5
+        r_magic.importance = 0.5
+        r_normal.importance = 0.5
         
         # Search for magic (should score high on r_magic)
         results = library.search("I want magic", mark_loaded=True)
@@ -148,30 +147,26 @@ def test_library_time_travel(mock_ctx):
     assert mock_ctx.registry[record.uid].content == "Start"
 
 def test_record_lazy_evaluation(mock_ctx):
-    with patch("worldline.llm.get_emb") as mock_emb, patch("worldline.llm.get_importance") as mock_imp:
+    with patch("worldline.library.get_emb") as mock_emb:
         mock_emb.return_value = np.array([0.1, 0.2])
-        mock_imp.return_value = 0.95
         
         record = Record(ctx=mock_ctx, name="Title", content="Hello world")
         
         # API should NOT have been called on init!
         mock_emb.assert_not_called()
-        mock_imp.assert_not_called()
         
         # Accessing properties triggers evaluation
-        assert record.importance == 0.95
+        assert record.importance == 0.33
         assert np.array_equal(record.emb, np.array([0.1, 0.2]))
         
         mock_emb.assert_called_once()
-        mock_imp.assert_called_once()
         
         # Accessing again uses cache (call count remains 1)
-        _ = record.importance
         _ = record.emb
-        assert mock_imp.call_count == 1
+        assert mock_emb.call_count == 1
 
 def test_record_unpack_resets_lazy_cache(mock_ctx):
-    with patch("worldline.llm.get_emb") as mock_emb, patch("worldline.llm.get_importance"):
+    with patch("worldline.library.get_emb") as mock_emb:
         record = Record(ctx=mock_ctx, name="State 1", content="")
         
         # Trigger cache
@@ -179,7 +174,7 @@ def test_record_unpack_resets_lazy_cache(mock_ctx):
         assert mock_emb.call_count == 1
         
         # Unpack changes state and resets cache
-        record.unpack({"name": "State 2", "content": "", "source": None, "related_UIDs": []})
+        record.unpack({"name": "State 2", "content": "", "source": None, "related_UIDs": [], "importance": 0.5})
         assert record.name == "State 2"
         
         # Cache should be cleared, next access triggers API again
@@ -207,14 +202,14 @@ def test_library_tools(mock_ctx):
     lib = Library(ctx=mock_ctx, name="Test Lib")
     
     # Test tool_create
-    res_create = lib._tool_create("Record 1", "Content 1.", "N/A", "N/A")
+    res_create = lib._tool_create("Record 1", "Content 1.", "N/A", "N/A", 0.5)
     assert "Success" in res_create
     assert len(lib.records) == 1
     r1_uid = list(lib.records)[0]
     
     # Test tool_create with length error
     long_content = "Sentence. " * (mock_ctx.config.library_max_record_size + 5)
-    res_err = lib._tool_create("Long", long_content, "N/A", "N/A")
+    res_err = lib._tool_create("Long", long_content, "N/A", "N/A", 0.5)
     assert "Error" in res_err
     
     # Test tool_recall
@@ -227,20 +222,19 @@ def test_library_tools(mock_ctx):
     assert "Error" in res_recall_miss
     
     # Test tool_search (mock emb)
-    with patch("worldline.library.get_emb") as mock_emb, patch("worldline.llm.get_importance") as mock_imp:
+    with patch("worldline.library.get_emb") as mock_emb:
         mock_emb.return_value = np.array([1.0, 0.0])
-        mock_imp.return_value = 0.5
         res_search = lib._tool_search("query")
         assert "Success" in res_search
         
     # Test tool_update
-    res_up = lib._tool_update(r1_uid, "N/A", "More content.", "N/A", "N/A", True)
+    res_up = lib._tool_update(r1_uid, "N/A", "More content.", "N/A", "N/A", 0.8, True)
     assert "Success" in res_up
     assert "More content" in mock_ctx.registry[r1_uid].content
     
     # Test tool_update unloaded error
     lib.loaded.clear()
-    res_up_err = lib._tool_update(r1_uid, "N/A", "Content", "N/A", "N/A", True)
+    res_up_err = lib._tool_update(r1_uid, "N/A", "Content", "N/A", "N/A", -1.0, True)
     assert "Error" in res_up_err
     assert "not in the context" in res_up_err
     
@@ -256,14 +250,13 @@ def test_library_tools(mock_ctx):
     assert tools[0].name == "Test Lib - Recall"
 
 def test_library_initialize_search(mock_ctx):
-    with patch("worldline.library.get_emb") as mock_emb, patch("worldline.llm.get_importance") as mock_imp:
+    with patch("worldline.library.get_emb") as mock_emb:
         mock_emb.return_value = np.array([1.0, 0.0])
-        mock_imp.return_value = 0.5
         
         lib = Library(ctx=mock_ctx, name="Init Lib")
         r1 = lib.create("Apples", "Red apples")
         r1._emb = np.array([1.0, 0.0])
-        r1._importance = 0.5
+        r1.importance = 0.5
         
         # Test that initialize clears and searches automatically
         content = lib.initialize("I want apples")
@@ -271,11 +264,9 @@ def test_library_initialize_search(mock_ctx):
         assert "Apples" in content
         
 def test_record_batch_gen(mock_ctx):
-    with patch("worldline.llm.get_emb") as mock_emb, patch("worldline.llm.get_importance") as mock_imp:
+    with patch("worldline.library.get_emb") as mock_emb:
         # get_emb returns a 2D array
         mock_emb.return_value = np.array([[1.0, 0.0], [0.0, 1.0]])
-        # get_importance returns a list of floats
-        mock_imp.return_value = [0.8, 0.9]
         
         r1 = Record(ctx=mock_ctx, name="A")
         r2 = Record(ctx=mock_ctx, name="B")
@@ -285,8 +276,5 @@ def test_record_batch_gen(mock_ctx):
         
         # Verify cache fields are populated properly
         mock_emb.assert_called_once()
-        mock_imp.assert_called_once()
         assert np.array_equal(r1._emb, np.array([1.0, 0.0]))
         assert np.array_equal(r2._emb, np.array([0.0, 1.0]))
-        assert r1._importance == 0.8
-        assert r2._importance == 0.9

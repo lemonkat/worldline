@@ -49,6 +49,7 @@ class Record(Note):
     content: str = ""
     source: typing.Optional[str] = None
     related: list[UID] = Field(default_factory=list)
+    importance: float = 0.33
 
     sys_name: typing.ClassVar[str] = "Record"
     sys_desc: typing.ClassVar[str] = "A discrete unit of semantic memory or lore. You can recall Records by UID, or use the Library's search tools to find them."
@@ -57,20 +58,7 @@ class Record(Note):
         
     # Private cache fields. Use the properties `importance` and `emb` instead.
     # These are only passed in manually when loading from a save file on disk.
-    _importance: typing.Optional[float] = PrivateAttr(default=None)
     _emb: typing.Optional[np.ndarray[np.float32]] = PrivateAttr(default=None)
-
-    @property
-    def importance(self) -> float:
-        """Lazily evaluates and returns the importance score of the Note.
-
-        Returns:
-            float: The importance score.
-        """
-        if self._importance is None:
-            from worldline.llm import get_importance
-            self._importance = get_importance(self.get_content(False))
-        return self._importance
 
     @property
     def emb(self) -> np.ndarray[np.float32]:
@@ -80,7 +68,6 @@ class Record(Note):
             np.ndarray: The embedding vector.
         """
         if self._emb is None:
-            from worldline.llm import get_emb
             self._emb = get_emb(self.get_content(False))
         return self._emb
 
@@ -94,7 +81,7 @@ class Record(Note):
         Returns:
             str: The formatted narrative string representing this memory.
         """
-        lines = [f"[Record] {self.name}:", self.content]
+        lines = [f"[Record] {self.name} (importance {self.importance}):", self.content]
         if self.source: 
             lines.append(f"Source: {self.source}")
         if self.related:
@@ -112,7 +99,8 @@ class Record(Note):
             "name": self.name,
             "content": self.content,
             "source": self.source,
-            "related_UIDs": self.related
+            "related_UIDs": self.related,
+            "importance": self.importance
         }
 
     def _unpack(self, state: dict) -> None:
@@ -125,8 +113,8 @@ class Record(Note):
         self.content = state["content"]
         self.source = state["source"]
         self.related = state["related_UIDs"]
+        self.importance = state["importance"]
 
-        self._importance = None
         self._emb = None
 
     @classmethod
@@ -136,16 +124,11 @@ class Record(Note):
         Args:
             records (list[Record]): The list of records to generate cache fields for.
         """
-        to_update = [(record, record.get_content(include_uid=False)) for record in records if record._importance is None or record._emb is None]
+        to_update = [(record, record.get_content(include_uid=False)) for record in records if record._emb is None]
         if to_update:
-            from worldline.llm import get_importance, get_emb
             embeddings = get_emb([c for r, c in to_update])
-            importances = get_importance([c for r, c in to_update])
-            for (r, c), e, i in zip(to_update, embeddings, importances):
-                if r._emb is None:
-                    r._emb = e.copy()
-                if r._importance is None:
-                    r._importance = i
+            for (r, c), e in zip(to_update, embeddings):
+                r._emb = e.copy()
 
 class Library(Note):
     """A collection of long-term semantic memories (Records).
@@ -263,6 +246,7 @@ class Library(Note):
         content: str,
         source: typing.Optional[str] = None,
         related: typing.Optional[list[UID]] = None, 
+        importance: float = 0.33,
     ) -> Record:
         """Creates a new Record and stores it in the Library.
 
@@ -271,12 +255,13 @@ class Library(Note):
             content (str): The detailed text.
             source (str, optional): Provenance description. Defaults to None.
             related (list[UID], optional): Pointers to associated Records. Defaults to None.
+            importance (float, optional): Importance score for the Record. Defaults to 0.33.
 
         Returns:
             Record: The newly instantiated Record.
         """
         with self.lock:
-            record = Record(ctx=self.ctx, name=name, content=content, source=source, related=related or [])
+            record = Record(ctx=self.ctx, name=name, content=content, source=source, related=related or [], importance=importance)
             self.records.add(record.uid)
             self.edited = True
             return record
@@ -288,6 +273,7 @@ class Library(Note):
         content: typing.Optional[str] = None,
         source: typing.Optional[str] = None,
         related: typing.Optional[list[UID]] = None, 
+        importance: typing.Optional[float] = None,
         append: bool = True,
     ) -> Record:
         """Mutates an existing Record, provided it is currently loaded in working memory.
@@ -298,6 +284,7 @@ class Library(Note):
             content (str, optional): New content text. Defaults to None.
             source (str, optional): New source description. Defaults to None.
             related (list[UID], optional): New associative pointers. Defaults to None.
+            importance (float, optional): Importance score for the Record. Defaults to None.
             append (bool, optional): If True, appends the new content to the old content. 
                 If False, overwrites the content. Defaults to True.
 
@@ -318,6 +305,8 @@ class Library(Note):
                 record.source = source
             if related is not None:
                 record.related = related
+            if importance is not None:
+                record.importance = importance
 
             self.edited = True
             record.edited = True
@@ -422,7 +411,7 @@ class Library(Note):
             }
         )
 
-    def _tool_create(self, name: str, content: str, source: str, related: str) -> str:
+    def _tool_create(self, name: str, content: str, source: str, related: str, importance: float) -> str:
         """DSPy tool wrapper for creating a new Record in the Library.
         
         Args:
@@ -430,6 +419,7 @@ class Library(Note):
             content (str): The narrative text.
             source (str): A description of the origin of this memory ('N/A' for None).
             related (str): A comma-separated string of related UIDs ('N/A' for None).
+            importance (float): An importance score for this Record, from 0 to 1.
             
         Returns:
             str: A success message with the formatted Record, or an error string.
@@ -444,7 +434,9 @@ class Library(Note):
                 return f"Error: Referenced UID {uid} but no Record with that UID could be found. It may have been deleted. No changes have been made."
         if len(related_UIDs) > self.ctx.config.library_max_n_refs:
             return f"Error: Too many Records referenced ({len(related_UIDs)} Records). Max is {self.ctx.config.library_max_n_refs} Records."
-        record = self.create(name, content, None if source.upper().strip() == "N/A" else source, related_UIDs)
+        if importance < 0 or importance > 1:
+            return f"Error: importance {importance} out of bounds. It must be between 0 and 1. No changes have been made."
+        record = self.create(name, content, None if source.upper().strip() == "N/A" else source, related_UIDs, importance)
         return f"Success. Created Record: {self.format_records([record])}"
 
     @property
@@ -458,10 +450,11 @@ class Library(Note):
                 "content": f"The contents of this Record. Recommended {self.ctx.config.library_avg_record_size} sentences, maximum {self.ctx.config.library_max_record_size} sentences.",
                 "source": "A very short description of how this information came to be. Write 'N/A' to leave empty.",
                 "related": f"UIDs of potentially relevant existing Records. Case-sensitive. Separate by commas, like 'XY12, A1B9, 74J8'. Write 'N/A' to leave empty. Recommended {self.ctx.config.library_avg_n_refs} references, max {self.ctx.config.library_max_n_refs} references.",
+                "importance": "Importance score for this Record. Must be between 0 and 1. Higher = more important.",
             }
         )
     
-    def _tool_update(self, uid: UID, name: str, content: str, source: str, related: str, append: bool) -> str:
+    def _tool_update(self, uid: UID, name: str, content: str, source: str, related: str, importance: float, append: bool) -> str:
         """DSPy tool wrapper for modifying an existing Record in working memory.
         
         Args:
@@ -470,6 +463,7 @@ class Library(Note):
             content (str): The new text content ('N/A' to skip).
             source (str): The new origin description ('N/A' to skip).
             related (str): A comma-separated string of new related UIDs ('N/A' to skip).
+            importance (float): An importance score for this Record, from 0 to 1 (-1 to skip).
             append (bool): If True, appends the new content instead of overwriting.
             
         Returns:
@@ -498,12 +492,17 @@ class Library(Note):
                     return f"Error: Referenced UID {uid} but no Record with that UID could be found. It may have been deleted. No changes have been made."
             if len(related_UIDs) > self.ctx.config.library_max_n_refs:
                 return f"Error: Too many Records referenced ({len(related_UIDs)} Records). Max is {self.ctx.config.library_max_n_refs} Records."
+
+        if importance != -1 and importance < 0 or importance > 1:
+            return f"Error: importance {importance} out of bounds. It must be between 0 and 1. No changes have been made."
+            
         record = self.update(
             uid, 
             None if name.upper() == "N/A" else name,
             None if content.upper() == "N/A" else content,
             None if source.upper() == "N/A" else source,
             related_UIDs,
+            None if importance == -1 else importance,
             False,
         )
         return f"Success. Updated Record: {self.format_records([record])}"
@@ -520,6 +519,7 @@ class Library(Note):
                 "content": f"The contents of this Record. Recommended {self.ctx.config.library_avg_record_size} sentences, maximum {self.ctx.config.library_max_record_size} sentences. Write 'N/A' to not edit.",
                 "source": "A very short description of how this information came to be. Write 'N/A' to not edit. Avoid editing this unless necessary. Will overwrite existing sources.",
                 "related": f"UIDs of potentially relevant existing Records. Case-sensitive. Separate by commas, like 'XY12, A1B9, 74J8'. Write 'N/A' to not edit. Avoid editing this unless necessary. Will overwrite existing references. Recommended {self.ctx.config.library_avg_n_refs} references, max {self.ctx.config.library_max_n_refs} references.",
+                "importance": "Importance score for this Record. Must be between 0 and 1. Higher = more important. Write -1 to not edit.",
                 "append": "Whether or not to append to the existing content or overwrite it. Does nothing if content = 'N/A'.",
             }
         )

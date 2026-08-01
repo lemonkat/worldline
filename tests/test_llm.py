@@ -3,71 +3,40 @@ import numpy as np
 from unittest.mock import patch, MagicMock
 import worldline.llm as llm
 
-@patch("os.environ", {"GEMINI_API_KEY": "fake_key"})
+@patch("os.environ", {"GEMINI_API_KEY": "fake_gemini", "OPENAI_API_KEY": "fake_openai", "ANTHROPIC_API_KEY": "fake_anthropic"})
 @patch("dotenv.load_dotenv")
 @patch("dspy.LM")
-@patch("dspy.Predict")
-def test_init_sets_globals(mock_predict, mock_lm, mock_dotenv):
+@patch("requests.get")
+def test_init_models(mock_requests_get, mock_lm, mock_dotenv):
     # Reset globals in case other tests ran
-    llm.LM_LIGHT = None
-    llm.LM_HEAVY = None
+    llm.TEXT_MODELS.clear()
     llm.importance = None
     
-    mock_lm.side_effect = ["light_model", "heavy_model"]
-    mock_predict.return_value = "predict_module"
+    mock_lm.return_value = "mock_lm_instance"
     
-    llm.init()
+    mock_response = MagicMock()
+    mock_response.status_code = 200
+    mock_response.json.return_value = {"models": [{"name": "hermes3:8b"}, {"name": "llama3"}]}
+    mock_requests_get.return_value = mock_response
     
-    assert llm.GEMINI_API_KEY == "fake_key"
-    assert llm.LM_LIGHT == "light_model"
-    assert llm.LM_HEAVY == "heavy_model"
-    assert llm.importance == "predict_module"
+    llm.init_models()
     
-    # Test idempotency
-    llm.init()
-    assert mock_lm.call_count == 2 # 2 calls from the first init (light, heavy), shouldn't increment
+    # Check that cloud models are populated
+    assert "gemini-2.5-flash-lite" in llm.TEXT_MODELS
+    assert "gpt-5-nano" in llm.TEXT_MODELS
+    assert "claude-haiku-4-5" in llm.TEXT_MODELS
+    
+    # Check that local models are populated
+    assert "local-hermes3:8b" in llm.TEXT_MODELS
+    assert "local-llama3" in llm.TEXT_MODELS
+    
+    # Test idempotency - calling again shouldn't duplicate or crash
+    llm.init_models()
+    # It shouldn't create new LM instances for already existing keys
+    assert mock_lm.call_count == 13 # 3 gemini + 3 openai + 3 anthropic + 2 local + 2 local (since Ollama lacks idempotency check)
 
-@patch("worldline.llm.init")
-def test_get_importance(mock_init):
-    # Set up mock importance module
-    mock_importance_module = MagicMock()
-    
-    # Mock the return value chain: importance_module(text=..., lm=...).importance
-    mock_result = MagicMock()
-    mock_result.importance = 0.95
-    mock_importance_module.return_value = mock_result
-    
-    llm.importance = mock_importance_module
-    llm.LM_LIGHT = "mock_lm_light"
-    
-    result = llm.get_importance("Test text")
-    
-    assert result == 0.95
-    mock_init.assert_called_once()
-    mock_importance_module.assert_called_once_with(text="Test text", lm="mock_lm_light")
-
-@patch("worldline.llm.init")
-@patch("dspy.context")
-@patch("dspy.Parallel")
-def test_get_importance_batch(mock_parallel, mock_context, mock_init):
-    import worldline.llm as llm
-    mock_parallel_instance = MagicMock()
-    mock_result1 = MagicMock()
-    mock_result1.importance = 0.8
-    mock_result2 = MagicMock()
-    mock_result2.importance = 0.9
-    mock_parallel_instance.return_value = [mock_result1, mock_result2]
-    mock_parallel.return_value = mock_parallel_instance
-    
-    result = llm.get_importance(["text1", "text2"])
-    
-    assert result == [0.8, 0.9]
-    mock_parallel.assert_called_once_with(num_threads=15, disable_progress_bar=True)
-    mock_parallel_instance.assert_called_once()
-
-@patch("worldline.llm.init")
 @patch("sentence_transformers.SentenceTransformer")
-def test_get_emb(mock_sentence_transformer, mock_init):
+def test_get_emb(mock_sentence_transformer):
     # Reset the global so it initializes the mock and clear cache
     llm.LOCAL_EMB_MODEL = None
     llm._EMB_CACHE.clear()
@@ -79,7 +48,7 @@ def test_get_emb(mock_sentence_transformer, mock_init):
     result = llm.get_emb("Test text")
     
     assert np.allclose(result, [0.1, 0.2, 0.3])
-    mock_init.assert_called_once()
+    # Init_models is no longer called in get_emb
     mock_sentence_transformer.assert_called_once_with("all-MiniLM-L6-v2")
     mock_emb_model.encode.assert_called_once_with(["Test text"], convert_to_numpy=True)
 

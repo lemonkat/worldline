@@ -155,3 +155,26 @@ def test_note_from_packed(mock_ctx):
     assert note.text == "Restored State"
     assert note.edited is False
     assert mock_ctx.registry[uid] is note
+
+def test_context_loading_manager(mock_ctx):
+    assert not mock_ctx.is_loading
+    with mock_ctx.loading():
+        assert mock_ctx.is_loading
+    assert not mock_ctx.is_loading
+
+def test_lock_notes(mock_ctx):
+    from worldline.data import lock_notes
+    from worldline.uid import UID
+    import threading
+    
+    n1 = MockNote(ctx=mock_ctx, text="")
+    n1.uid = UID("note-b")
+    n1.lock = threading.RLock()
+    
+    n2 = MockNote(ctx=mock_ctx, text="")
+    n2.uid = UID("note-a")
+    n2.lock = threading.RLock()
+    
+    with lock_notes([n1, n2]):
+        assert True
+

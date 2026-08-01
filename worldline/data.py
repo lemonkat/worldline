@@ -69,6 +69,10 @@ class Config(BaseModel):
     """Bundled configuration settings for Worldline.
 
     Attributes:
+        llm_light (str): Model name for light model. Select for bare minimum cost.
+        llm_medium (str): Model name for medium model. Select for tool calling capability and then cost.
+        llm_heavy (str): Model name for heavy model. Select for reasoning and tool calling, then prose.
+
         worldline_recall_k (int): How many recent beats/sub-arcs per arc to recall for non-root Worldlines.
         worldline_max_depth (int): Maximum nesting depth for Worldlines.
         worldline_avg_entry_size (int): Average text size measured in sentences for Worldline entry contents.
@@ -82,6 +86,10 @@ class Config(BaseModel):
         library_avg_n_refs (int): Average number of related pointers a Record should maintain.
         library_max_n_refs (int): Maximum number of related pointers a Record should maintain.
     """
+    llm_light: str = "local-hf.co/mradermacher/Llama-3.2-1B-Instruct-heretic-i1-GGUF:latest"
+    llm_medium: str = "local-hermes3:8b"
+    llm_heavy: str = "local-hf.co/tvall43/Qwen3.6-14B-A3B-FableVibes-GGUF:latest"
+
     worldline_recall_k: int = 10
     worldline_max_depth: int = 10
     worldline_avg_entry_size: int = 3
@@ -126,6 +134,10 @@ class Context:
     registry: dict[UID, "Note"] = field(default_factory=dict)
     history: list[Update] = field(default_factory=list)
     lock: threading.RLock = field(default_factory=threading.RLock)
+    """threading.RLock: Thread-safe lock for history and registry mutation."""
+
+    is_loading: bool = False
+    """bool: Flag set by `Context.loading()` to suppress default sub-note generation during load."""
 
     def record(self) -> None:
         """Commits all current edits to the history log.
@@ -162,6 +174,16 @@ class Context:
                 self.registry[uid].unpack(state)
                 if len(updated) == len(self.registry):
                     break
+
+
+    @contextlib.contextmanager
+    def loading(self):
+        """Temporarily signals validators to skip creating default sub-objects."""
+        self.is_loading = True
+        try:
+            yield  # This is where the code inside the 'with' block runs
+        finally:
+            self.is_loading = False  # Guaranteed to run, even if it crashes!
 
 class Note(BaseModel):
     """Base class for all saveable objects in the Worldline system.
@@ -325,11 +347,12 @@ class Note(BaseModel):
         Returns:
             typing.Self: the loaded Note or Note subclass.
         """
-        note = cls(ctx=ctx, uid=uid) 
-        with note.lock:
-            note._unpack(state)
-            note.edited = False 
-            return note
+        with ctx.loading():
+            note = cls(ctx=ctx, uid=uid)
+            with note.lock:
+                note._unpack(state)
+                note.edited = False 
+                return note
 
             
 @contextlib.contextmanager

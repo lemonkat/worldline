@@ -140,6 +140,21 @@ def test_actor_initialization(mock_ctx):
     assert mock_ctx.registry[actor.memory_uid] == actor.memory
     assert mock_ctx.registry[actor.moment_uid] == actor.moment
 
+def test_actor_setup_bypassed_if_loading(mock_ctx):
+    mock_ctx.is_loading = True
+    actor = Actor(ctx=mock_ctx, name="Loading Actor")
+    
+    assert actor.timeline_uid is None
+    assert actor.memory_uid is None
+    assert actor.moment_uid is None
+
+def test_actor_properties_resolve_from_registry(mock_ctx):
+    actor = Actor(ctx=mock_ctx, name="Properties Actor")
+    
+    assert actor.timeline == mock_ctx.registry[actor.timeline_uid]
+    assert actor.memory == mock_ctx.registry[actor.memory_uid]
+    assert actor.moment == mock_ctx.registry[actor.moment_uid]
+
 def test_actor_pack_unpack(mock_ctx):
     actor = Actor(ctx=mock_ctx, name="Pack Actor")
     state = actor.pack()
@@ -165,5 +180,5 @@ def test_actor_tools(mock_ctx):
     lookup_tool_names = [t.name for t in lookup_tools]
     
     # Lookup tools should not contain moment/timeline tools
-    assert "D20" in lookup_tool_names
+    assert "D20" not in lookup_tool_names
     assert len(lookup_tools) < len(tools)

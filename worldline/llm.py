@@ -14,6 +14,7 @@ from __future__ import annotations
 import os
 import typing
 import functools
+import requests
 
 import numpy as np
     
@@ -25,82 +26,57 @@ EMBEDDING_MODEL_NAME: str = "all-MiniLM-L6-v2"
 LOCAL_EMB_MODEL = None
 _EMB_CACHE: dict[str, np.ndarray] = {}
 
-GEMINI_API_KEY: typing.Optional[str] = None
-
-LM_LIGHT_NAME: str = "gemini/gemini-3.5-flash-lite"
-LM_HEAVY_NAME: str = "gemini/gemini-3.1-pro"
-
-LM_LIGHT: typing.Optional[dspy.LM] = None
-LM_HEAVY: typing.Optional[dspy.LM] = None
+TEXT_MODELS: dict[str, dspy.LM] = {}
 
 importance: typing.Optional[dspy.Predict] = None
 
-def init() -> None:
+def init_models() -> None:
     """
     Initializes the Worldline language models by loading environment variables.
 
     This function is idempotent; it safely returns if already initialized. 
-    It loads the `GEMINI_API_KEY` from a `.env` file and initializes the 
-    lightweight and heavyweight language models from DSPy. It also configures 
-    a DSPy Predict module for evaluating text importance. Note that the 
-    embedding model is initialized separately and lazily in `get_emb`.
-
-    Globals Modified:
-        GEMINI_API_KEY (str): API key for Gemini.
-        LM_LIGHT (dspy.LM): Fast model for simple tasks like scoring.
-        LM_HEAVY (dspy.LM): Powerful model for complex tasks.
-        importance (dspy.Predict): Preconfigured DSPy module for scoring text importance.
+    It loads API keys from a `.env` file and initializes the `TEXT_MODELS` 
+    dictionary with supported DSPy LM modules (Gemini, OpenAI, Anthropic, and 
+    local Ollama models via API polling). It also configures a DSPy Predict 
+    module for evaluating text importance. Note that the embedding model 
+    is initialized separately and lazily in `get_emb`.
     """
-
-    global GEMINI_API_KEY, LM_LIGHT, LM_HEAVY, importance
-
-    if LM_LIGHT is not None:
-        return
 
     # load up models
     dotenv.load_dotenv()
-    GEMINI_API_KEY = os.environ["GEMINI_API_KEY"]
 
-    # light and heavy LLMs for different tasks
-    LM_LIGHT = dspy.LM(LM_LIGHT_NAME, api_key=GEMINI_API_KEY)
-    LM_HEAVY = dspy.LM(LM_HEAVY_NAME, api_key=GEMINI_API_KEY)
+    gemini_api_key = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
+    if gemini_api_key and "gemini-2.5-flash-lite" not in TEXT_MODELS:
+        TEXT_MODELS["gemini-2.5-flash-lite"] = dspy.LM("gemini/gemini-2.5-flash-lite", api_key=gemini_api_key)
+        TEXT_MODELS["gemini-3.6-flash"] = dspy.LM("gemini/gemini-3.6-flash", api_key=gemini_api_key)
+        TEXT_MODELS["gemini-3.1-pro-preview"] = dspy.LM("gemini/gemini-3.1-pro-preview", api_key=gemini_api_key)
 
-    importance = dspy.Predict(
-        dspy.Signature(
-            "text: str -> importance: float",
-            instructions = """
-            Rate the importance or notability of the text and what it describes on a scale from 0 to 100. 
-            0 is not important at all and 100 is extremely important. 
-            Then divide by 100 to get a value between 0 and 1.
-            """
-        )
-    )
+    openai_api_key = os.environ.get("OPENAI_API_KEY")
+    if openai_api_key and "gpt-5-nano" not in TEXT_MODELS:
+        TEXT_MODELS["gpt-5-nano"] = dspy.LM("openai/gpt-5-nano", api_key=openai_api_key)
+        TEXT_MODELS["gpt-5.6-terra"] = dspy.LM("openai/gpt-5.6-terra", api_key=openai_api_key)
+        TEXT_MODELS["gpt-5.6-sol"] = dspy.LM("openai/gpt-5.6-sol", api_key=openai_api_key)
 
-def get_importance(text: typing.Union[str, list[str]]) -> typing.Union[float, list[float]]:
-    """
-    Evaluates the narrative importance of a given text or texts using an LLM.
+    anthropic_api_key = os.environ.get("ANTHROPIC_API_KEY")
+    if anthropic_api_key and "claude-haiku-4-5" not in TEXT_MODELS:
+        TEXT_MODELS["claude-haiku-4-5"] = dspy.LM("anthropic/claude-haiku-4-5", api_key=anthropic_api_key)
+        TEXT_MODELS["claude-sonnet-5"] = dspy.LM("anthropic/claude-sonnet-5", api_key=anthropic_api_key)
+        TEXT_MODELS["claude-fable-5"] = dspy.LM("anthropic/claude-fable-5", api_key=anthropic_api_key)
 
-    Leverages `dspy.Parallel` to concurrently evaluate batches of text, utilizing 
-    the lightweight language model for rapid scoring.
-
-    Args:
-        text (str or list[str]): A single string or a list of strings to evaluate.
-
-    Returns:
-        float or list[float]: A value (or list of values) between 0.0 and 1.0 
-            representing the importance of the text(s).
-    """
-    init()
-    if isinstance(text, str):
-        return importance(text=text, lm=LM_LIGHT).importance
-
-    # Use native DSPy Parallel to handle threadpooling, and rely on 
-    # DSPy's built-in exponential backoff for rate limiting.
-    with dspy.context(lm=LM_LIGHT):
-        parallel = dspy.Parallel(num_threads=15, disable_progress_bar=True)
-        results = parallel([(importance, {"text": t}) for t in text])
-        
-    return [r.importance for r in results]
+    try:
+        # Ask Ollama for the list of installed models
+        response = requests.get("http://localhost:11434/api/tags", timeout=1.0)
+        if response.status_code == 200:
+            for model in response.json().get("models", []):
+                TEXT_MODELS["local-" + model["name"]] = dspy.LM(
+                    "ollama_chat/" + model["name"], 
+                    api_base="http://localhost:11434",
+                    api_key="",
+                )
+            
+    except requests.exceptions.RequestException:
+        pass
+            
 
 def get_emb(text: typing.Union[str, list[str]], **kwargs) -> np.ndarray[np.float32]:
     """
@@ -138,7 +114,6 @@ def get_emb(text: typing.Union[str, list[str]], **kwargs) -> np.ndarray[np.float
             uncached_texts.append(t)
 
     if uncached_texts:
-        init()
         if LOCAL_EMB_MODEL is None:
             from sentence_transformers import SentenceTransformer
             LOCAL_EMB_MODEL = SentenceTransformer(EMBEDDING_MODEL_NAME)
@@ -157,7 +132,6 @@ def get_emb(text: typing.Union[str, list[str]], **kwargs) -> np.ndarray[np.float
     # Fill empty strings with zeros using the model's exact dimensionality
     if any(r is None for r in results):
         if LOCAL_EMB_MODEL is None:
-            init()
             from sentence_transformers import SentenceTransformer
             LOCAL_EMB_MODEL = SentenceTransformer(EMBEDDING_MODEL_NAME)
         dim = LOCAL_EMB_MODEL.get_embedding_dimension()
