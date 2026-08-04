@@ -148,6 +148,8 @@ class Actor(Note):
         timeline_uid (UID, optional): Pointer to the Actor's Worldline (recent events).
         memory_uid (UID, optional): Pointer to the Actor's Library (world knowledge/beliefs).
         moment_uid (UID, optional): Pointer to the Actor's Sketchpad (current thoughts).
+        _lore_agent (typing.Optional[WorldlineAgent]): Cached singleton of the nested ReAct agent used for lore lookups.
+        LORE_AGENT_SIGNATURE (typing.ClassVar[type[dspy.Signature]]): Specialized LLM formatting instructions for the lore agent.
     """
     name: str = "Unnamed Actor"
     timeline_uid: typing.Optional[UID] = None
@@ -156,6 +158,24 @@ class Actor(Note):
 
     sys_name: typing.ClassVar[str] = "Actor"
     sys_desc: typing.ClassVar[str] = "Base class. Not meant to be used directly. IF YOU SEE THIS SOMETHING HAS GONE WRONG."
+
+    _lore_agent: typing.Optional[WorldlineAgent] = None
+
+    LORE_AGENT_SIGNATURE: typing.ClassVar[type[dspy.Signature]] = dspy.make_signature(
+        signature={
+            "query": (
+                str, 
+                dspy.InputField(desc="What someone wants to know."),
+            ),
+            "response": (
+                str, 
+                dspy.OutputField(desc="Your response, either found or created story lore."),
+            ),
+        },
+        instructions="""Answer the provided query about the current state and lore of the story so they can continue it.
+Find the information if it exists, and ONLY if it does not exist, come up with what it should be and save it for future reference.
+Provide plenty of information, too much is better than too little here.""",
+    )
 
     @model_validator(mode="after")
     def _setup_actor(self) -> typing.Self:
@@ -175,27 +195,43 @@ class Actor(Note):
     def _pack(self) -> dict:
         """Packages the Actor's sub-Note UIDs into a state snapshot for saving."""
         return {
-            "data_UIDs": [self.timeline_uid, self.memory_uid, self.moment_uid],
+            "timeline_UID": self.timeline_uid,
+            "memory_UID": self.memory_uid,
+            "moment_UID": self.moment_uid,
         }
 
     def _unpack(self, state: dict) -> None:
         """Restores the Actor's sub-Note UIDs from a state snapshot."""
-        self.timeline_uid, self.memory_uid, self.moment_uid = state["data_UIDs"]
+        self.timeline_uid = state["timeline_UID"]
+        self.memory_uid = state["memory_UID"]
+        self.moment_uid = state["moment_UID"]
 
     @property
     def timeline(self) -> typing.Optional[Worldline]:
         """Returns the Actor's Worldline instance (recent subjective events)."""
         return typing.cast(Worldline, self.ctx.registry[self.timeline_uid]) if self.timeline_uid else None
 
+    @timeline.setter
+    def timeline(self, timeline: typing.Optional[Worldline] = None) -> None:
+        self.timeline_uid = None if timeline is None else timeline.uid
+
     @property
     def memory(self) -> typing.Optional[Library]:
         """Returns the Actor's Library instance (long-term knowledge and beliefs)."""
         return typing.cast(Library, self.ctx.registry[self.memory_uid]) if self.memory_uid else None
 
+    @memory.setter
+    def memory(self, memory: typing.Optional[Library] = None) -> None:
+        self.memory_uid = None if memory is None else memory.uid
+
     @property
     def moment(self) -> typing.Optional[Sketchpad]:
         """Returns the Actor's Sketchpad instance (internal monologue and current plans)."""
         return typing.cast(Sketchpad, self.ctx.registry[self.moment_uid]) if self.moment_uid else None
+
+    @moment.setter
+    def moment(self, moment: typing.Optional[Sketchpad] = None) -> None:
+        self.moment_uid = None if moment is None else moment.uid
 
     @property
     def tools(self) -> list[dspy.Tool]:
@@ -209,4 +245,58 @@ class Actor(Note):
     @property
     def lookup_tools(self) -> list[dspy.Tool]:
         return self.memory.tools
+
+    @property
+    def lore_agent(self) -> WorldlineAgent:
+        """Lazily instantiates and returns the nested WorldlineAgent for lore lookups.
+
+        Constructs the DSPy signature and ReAct module only upon first access,
+        ensuring safe instantiation when loading from save files. This nested agent 
+        has access to the Actor's memory tools to search or create records.
+
+        Returns:
+            WorldlineAgent: The configured DSPy ReAct agent for lore lookups.
+        """
+        if self._lore_agent is None:
+            self._lore_agent = WorldlineAgent(
+                self.ctx,
+                self.LORE_AGENT_SIGNATURE,
+                [self.timeline, self.memory, self.moment],
+                self.memory.tools,
+            )
+
+        return self._lore_agent
+
+    def _tool_lore(self, query: str) -> str:
+        """DSPy tool wrapper that executes the nested Lore Agent to answer a query.
+        
+        Args:
+            query (str): The information the caller is looking for.
+            
+        Returns:
+            str: The response from the Lore Agent, containing found or invented lore.
+        """
+        return self.lore_agent(query=query).response
+
+    @property
+    def tool_lore(self) -> dspy.Tool:
+        """Returns the DSPy Tool object for lore lookups.
+        
+        This tool delegates queries to a nested ReAct agent with access to this Actor's 
+        memory tools, allowing it to search and invent records without exposing raw 
+        database operations to the caller.
+        
+        Returns:
+            dspy.Tool: The configured lore lookup tool.
+        """
+        return dspy.Tool(
+            self._tool_lore,
+            "Lore lookup",
+            """Use this tool to find information you can't find elsewhere, but use it only when necessary.
+If there is information that should exist but you don't have it, DO NOT make it up - request it using this tool to ensure consistency.
+Make sure to record in your Memory any response this tool returns so you have it for future use.""",
+            arg_desc={
+                "query": "The information you are looking for. If possible, mention what you do know relating to your query to help the system.",
+            }
+        )
         

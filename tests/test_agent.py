@@ -182,3 +182,27 @@ def test_actor_tools(mock_ctx):
     # Lookup tools should not contain moment/timeline tools
     assert "D20" not in lookup_tool_names
     assert len(lookup_tools) < len(tools)
+
+def test_actor_tool_lore(mock_ctx):
+    actor = Actor(ctx=mock_ctx, name="Lore Actor")
+    
+    # Mock the lore_agent call to avoid running DSPy ReAct
+    with patch("worldline.agent.WorldlineAgent.__call__") as mock_agent_call:
+        mock_agent_call.return_value = MagicMock(response="Mocked Lore Response")
+        
+        # Test tool_lore execution
+        result = actor._tool_lore("Who is the king?")
+        
+        assert result == "Mocked Lore Response"
+        mock_agent_call.assert_called_once_with(query="Who is the king?")
+        
+        # Verify tool_lore properties
+        tool = actor.tool_lore
+        assert tool.name == "Lore lookup"
+        
+        # Verify lore_agent initialization
+        lore_agent = actor.lore_agent
+        assert actor.timeline in lore_agent.notes
+        assert actor.memory in lore_agent.notes
+        assert actor.moment in lore_agent.notes
+        assert lore_agent.tools == actor.memory.tools

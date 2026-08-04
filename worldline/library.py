@@ -261,7 +261,14 @@ class Library(Note):
             Record: The newly instantiated Record.
         """
         with self.lock:
-            record = Record(ctx=self.ctx, name=name, content=content, source=source, related=related or [], importance=importance)
+            record = Record(
+                ctx=self.ctx, 
+                name=name, 
+                content=content, 
+                source=source, 
+                related=related or [], 
+                importance=importance,
+            )
             self.records.add(record.uid)
             self.edited = True
             return record

@@ -105,3 +105,21 @@ class TestAgentPersona:
         
         assert action.initiative == 0
         assert action.action is None
+
+    def test_tools_property_with_lore(self, base_actor, mock_ctx):
+        # Create a Fate Engine Actor to act as the global lore
+        fate_engine = Actor(ctx=mock_ctx, name="Fate Engine", uid=UID("fate-123"))
+        
+        # Create a Persona and assign it the Fate Engine as its lore
+        persona = AgentPersona(ctx=mock_ctx, name="Hero", uid=base_actor.uid)
+        persona.lore_uid = fate_engine.uid
+        
+        # Verify the Persona's tools include the Fate Engine's lore tool
+        tools = persona.tools
+        tool_names = [t.name for t in tools]
+        
+        assert "Lore lookup" in tool_names
+        
+        # Verify that without a lore_uid, the tool is not included
+        persona.lore_uid = None
+        assert "Lore lookup" not in [t.name for t in persona.tools]
