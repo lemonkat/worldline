@@ -124,15 +124,13 @@ class Worldline(Note):
 
     @property
     def latest(self) -> "Worldline":
-        """Retrieves the deepest open Arc node currently active in the Stack.
+        """Retrieves the last Arc or Beat.
 
         Returns:
-            Worldline: The deepest open Arc.
+            Worldline: The most recently added or edited sub-worldline.
         """
         with self.lock:
-            if self.children and not self[-1].content:
-                return self[-1].latest
-            return self
+            return self[-1].latest if self.children else self
 
     @property
     def depth(self) -> int:
@@ -150,34 +148,26 @@ class Worldline(Note):
             elif self.children:
                 return self[-1].depth + 1
             return 1
-
-    def _get_content(self, verbosity: int = 1) -> str:
+        
+    def _get_content(self, level: int = 0) -> str:
         """Packages the narrative data into a string for the LLM context window.
         
         Args:
-            verbosity (int, optional): If 0, truncates children to most recent K entries and does not display depth.
-                If 1, returns all children and displays depth, but children's children and beyond are limited to most recent K entries and do not display depth.
-                If 2, returns all children and displays depth. Defaults to 1.
+            level (int, optional): The current recursive level. Defaults to 0.
                          
         Returns:
-            str: A formatted string tree of events, with a `>>>` pointer indicating 
-                 the active injection point for the next event.
+            str: A formatted string of events.
         """
         with self.lock:
-            # open arc
-            if not self.content:
-                out = [f"[Worldline] {self.name} (current depth {self.depth}):" if verbosity > 0 else f"{self.name}:"]
-                for uid in self.children if verbosity > 0 else self.children[-self.ctx.config.worldline_recall_k:]:
-                    child = self[uid]
-                    for line in child._get_content(2 if verbosity == 2 else 0).splitlines():
-                        out.append("\n    ")
-                        out.append(line)
-                if not self.children or self[-1].content:
-                    out.append("\n>>>")
-                return "".join(out)
             # beat or closed arc
-            return f"{self.name}: {self.content}"
-
+            if self.content:
+                return "#" * level + f" {self.name}\n{self.content}"
+            # open arc
+            out = ["#" * level + " " + self.name if level else f"[Worldline] {self.name} (current depth {self.depth})"]
+            for uid in self.children[-self.ctx.config.worldline_recall_k:] if level else self.children:
+                out.append(self[uid]._get_content(level + 1))
+            return "\n".join(out)
+            
     def _unpack(self, state: dict) -> None:
         """Applies a packed state dictionary to internal variables.
 
@@ -226,7 +216,7 @@ class Worldline(Note):
         if n_sentences > self.ctx.config.worldline_max_entry_size:
             return f"Error: Content is too long ({n_sentences} sentences). Max length is {self.ctx.config.worldline_max_entry_size} sentences. No changes have been made."
         self.beat(name, content)
-        return f"Success: Step appended. Worldline state: {self.get_content()}"
+        return f"Success: New Beat appended. New Worldline data:\n{self.latest._get_content(self.depth)}"
 
     @property
     def tool_beat(self) -> dspy.Tool:
@@ -254,7 +244,7 @@ class Worldline(Note):
         if self.depth == self.ctx.config.worldline_max_depth:
             return f"Error: Worldline already at max depth of {self.depth}. No changes have been made."
         self.dive(name)
-        return f"Success: Arc diving to level {self.depth} appended. Worldline state: {self.get_content()}"
+        return f"Success: New arc appended. Current depth: {self.depth}. New Worldline data:\n{self.latest._get_content(self.depth - 1)}"
 
 
     @property
@@ -285,14 +275,14 @@ class Worldline(Note):
         if n_sentences > self.ctx.config.worldline_max_entry_size:
             return f"Error: Summary is too long ({n_sentences} sentences). Max length is {self.ctx.config.worldline_max_entry_size} sentences. No changes have been made."
         self.surface(summary)
-        return f"Success: Arc completed. Worldline state: {self.get_content()}"
+        return f"Success: Arc completed. Current depth: {self.depth} Updated worldline data:\n{self.latest._get_content(self.depth)}"
 
     @property
     def tool_surface(self) -> dspy.Tool:
         return dspy.Tool(
             self._tool_surface,
             f"{self.name} - Surface",
-            "Completes the current sub-arc, adding a summary, and surfacing to the previous depth level. Closed Arcs show only their summary and their contents will be inaccessible.",
+            "Completes the current sub-arc, adding a summary, and surfacing to the previous depth level. Closed Arcs show only their summary, their contents will be inaccessible.",
             arg_desc={
                 "summary": f"A summary of the current arc. Make sure to capture all relevant details. Recommended {self.ctx.config.worldline_avg_entry_size} sentences, maximum {self.ctx.config.worldline_max_entry_size} sentences.",
             }

@@ -165,10 +165,9 @@ def test_worldline_get_content(mock_ctx):
     
     # The output should show Arc 1, Beat 2, Beat 3, and the >>> pointer
     assert "Arc 1" in content
-    assert "Beat 2: Action 2." in content
-    assert "Beat 3: Action 3." in content
+    assert "Beat 2\nAction 2." in content
+    assert "Beat 3\nAction 3." in content
     assert "Beat 1" not in content # Truncated!
-    assert ">>>" in content
 
 def test_worldline_tools(mock_ctx):
     root = Worldline(ctx=mock_ctx, name="ROOT")
