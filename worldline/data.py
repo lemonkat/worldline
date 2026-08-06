@@ -88,7 +88,7 @@ class Config(BaseModel):
     """
     llm_light: str = "local-hf.co/mradermacher/Llama-3.2-1B-Instruct-heretic-i1-GGUF:latest"
     llm_medium: str = "local-hermes3:8b"
-    llm_heavy: str = "local-hf.co/tvall43/Qwen3.6-14B-A3B-FableVibes-GGUF:latest"
+    llm_heavy: str = "local-hf.co/bartowski/NousResearch_Hermes-4-14B-GGUF:latest"
 
     worldline_recall_k: int = 10
     worldline_max_depth: int = 10

@@ -1,0 +1,81 @@
+NOTE: This is MY planning document, DO NOT TOUCH THIS UNLESS YOU ARE ME
+
+so, the fate engine. the big thing. it's all for this.
+interface:
+inputs:
+who did something
+what they did
+dict [who: how to write what they see]
+
+output:
+third-person desc
+dict [who: what they see]
+
+(and modifies internal state)
+
+persona interface:
+something that returns current scene notes (@property decorator, already done)
+also turn(scene: str) -> tuple[initiative: int, action: str] (already done)
+playerpersona needs to do 2 network calls / turn: 1 to get scene notes, one to get action - can't find a good way to do it in 1 call
+
+FE, being Note subclass, will NOT have main coordination code, that will go elsewhere
+FE just contains world state + writing system
+
+anyways, configs.
+multiple levels: system, story, scene
+system: raw configs for search system and stuff, max iters for agents, things like that
+story: user prefs for what happens in the story
+scene: user prefs for how the story is told (similar to persona sys_scene_notes, also should exist for third person)
+what if, for simplicity, third-person desc and who sees what handled at same time? just add "an outside observer" to POV?
+hmm need context
+probably should have recent scene entries in the context for the scene/storytelling step
+thing is this is gonna take a while now
+
+what if multiple parallel extraction systems operating off of the same trajectory?
+DSPy's ReAct implementation has one Module do the actual tool calling, then another looks at what happened and writes the result
+maybe the agent is told to figure out what happens and roughly what it looks like, then a bunch of smaller models write the scenes in parallel?
+but they'd need to communicate or else inconsistencies could arise
+maybe it's fine if just 1 or 2 prior scenes are in context (LM_HEAVY's context size is 32K, LM_MEDIUM's context size is 128K), and FE just has a single extraction module that does all of them?
+which option would work best?
+
+also, coordinator class to handle everything
+what should it be called? Orchestrator? Conductor?
+
+also FE needs extra tools and data
+persona creation tool + set of persona UIDs
+persona creation tool: what should it take? maybe FE just provides big description text, Persona class has initialize(text) which starts up recent history?
+
+FE world initialization may need similar system, but that would take a variety of documents from the user - move init system to Actor?
+init system already exists for Notes but that does a different thing, maybe this should be called called generate, not initialize?
+would a single dspy signature work for both FE and Persona generation?
+FE generation optional - user could manually create the starting state via editor
+
+back to 3 levels of configs: what's the best way to set this up? story prefs need to be sent to all agents (will probably just be plain text, passed to Persona.turn()), scene prefs are sent through the Persona's interface, system prefs carried in context object
+game engine UI will have place to edit story prefs, 3rd person scene prefs
+
+also i was thinking
+what if we swapped the current way worldlines are formatted for something a bit closer to markdown?
+so a beat/closed arc at depth N looks like [N+1 #s] [title]:\n[content]
+and open arc looks like that but w/ no newline, no content
+this is kinda like how markdown headings work so maybe the LLM will understand it better
+or do LLMs work nicer with JSON than markdown?
+might need to tell LLM to not put markdown-like things into new beat objects so that it doesnt confuse itself later
+no need for ">>>" to indicate current level bc closed arcs dont show their contents, they look like beats
+
+
+updates:
+switched heavy model to hermes 4 14B, GGUF quantization
+so we will be making the worldline format swap
+for fate engine, heavy model performs tool calling and reasoning, then returns a moderately sized precise desc of all events
+WITHOUT calling initialize(), a second ChainOfThought module w/ medium model takes get_content() from FE's notes + heavy model's precise all event desc + scene prefs from each persona, returns scene for each persona
+separate generation signatures for persona and fate engine, they are different enough
+
+new Directive subclass of Note contains story instructions as text, no tools, every Actor stores the UID of the Directive
+this means no need to add more arguments to Persona.turn()
+
+Conductor object acts as global orchestrator, that's what i'll call it
+
+conductor will use either threading or async (with to_thread bc io ops will probably be blocking bc i dont want to put the async syntax in fate engine and persona and stuff) to call reasoning agent, and at the same time request the current scene configs from the personas (this takes a network call for player personas), hopefully threading overheads wont be too bad
+actually maybe it's better to just do those calls sequentially?
+nope thread switching way faster
+
