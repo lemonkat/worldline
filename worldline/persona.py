@@ -20,7 +20,8 @@ import dspy
 
 from worldline.uid import UID
 from worldline.data import Note
-from worldline.agent import WorldlineAgent, Actor
+from worldline.agent import WorldlineAgent
+from worldline.actor import Actor
 
 # initiative scores, 0 through 10 inclusive, 0 means no action
 Initiative = int
@@ -50,6 +51,9 @@ class Persona(Actor):
         _sys_scene_notes (typing.ClassVar[str]): Format string used by the 
             Fate Engine to describe scenes to this Persona.
     """
+
+    sys_name: typing.ClassVar[str] = "Persona"
+    sys_desc: typing.ClassVar[str] = "A representation of a story character."
 
     # for Fate Engine
     _sys_scene_notes: typing.ClassVar[str] = "Describe what {name} sees or perceives."
@@ -141,7 +145,7 @@ IMPORTANT: Someone else may act before you are able to, so do not record in your
             self._agent = WorldlineAgent(
                 self.ctx,
                 self.AGENT_SIGNATURE,
-                [self.timeline, self.memory, self.moment],
+                [self.directive, self.timeline, self.memory, self.moment],
                 self.tools,
             )
 

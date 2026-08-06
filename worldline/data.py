@@ -134,7 +134,6 @@ class Context:
     registry: dict[UID, "Note"] = field(default_factory=dict)
     history: list[Update] = field(default_factory=list)
     lock: threading.RLock = field(default_factory=threading.RLock)
-    """threading.RLock: Thread-safe lock for history and registry mutation."""
 
     is_loading: bool = False
     """bool: Flag set by `Context.loading()` to suppress default sub-note generation during load."""

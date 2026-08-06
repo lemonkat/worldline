@@ -7,7 +7,8 @@ from worldline.data import Context, Note, UIDGenerator, PageCounter, Config
 from worldline.worldline import Worldline
 from worldline.library import Library
 from worldline.sketchpad import Sketchpad
-from worldline.agent import Actor, WorldlineAgent
+from worldline.agent import WorldlineAgent
+from worldline.actor import Actor
 from worldline.persona import Persona, AgentPersona, Action
 
 @pytest.fixture
