@@ -65,12 +65,13 @@ def init_models() -> None:
 
     try:
         # Ask Ollama for the list of installed models
-        response = requests.get("http://localhost:11434/api/tags", timeout=1.0)
+        ollama_addr = os.environ.get("OLLAMA_HOST") or "http://localhost:11434"
+        response = requests.get(f"{ollama_addr}/api/tags", timeout=1.0)
         if response.status_code == 200:
             for model in response.json().get("models", []):
                 TEXT_MODELS["local-" + model["name"]] = dspy.LM(
                     "ollama_chat/" + model["name"], 
-                    api_base="http://localhost:11434",
+                    api_base=ollama_addr,
                     api_key="",
                 )
             
