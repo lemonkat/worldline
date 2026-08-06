@@ -1,3 +1,9 @@
+"""
+[Phase 2.5: Agents and Actors]
+
+WorldlineAgent module integrating Note system with DSPy's ReAct implementation.
+"""
+
 import random
 import typing
 

@@ -1,5 +1,5 @@
 """
-[Phase Two: Actor/Engine]
+[Phase 2.5: Agents and Actors]
 
 Base Actor infrastructure and Directive instructions for Project Worldline.
 
